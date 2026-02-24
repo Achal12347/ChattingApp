@@ -1,0 +1,7 @@
+- [ ] Modify ChatInput widget to support group chats by adding isGroupChat and groupId parameters
+- [ ] Adjust _sendMessage in ChatInput to use sendGroupMessageProvider for groups
+- [ ] Disable media attachments and typing for group chats in ChatInput
+- [ ] Update GroupChatScreen to use ChatInput instead of GroupChatInput
+- [ ] Remove the GroupChatInput class from GroupChatScreen
+- [ ] Test the group chat screen to ensure input works correctly
+- [ ] Verify individual chat input remains unchanged

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../constants.dart';
@@ -126,6 +127,17 @@ ThemeData _buildTheme({
       foregroundColor: colorScheme.onSurface,
       elevation: 0,
       scrolledUnderElevation: 0,
+      systemOverlayStyle: brightness == Brightness.dark
+          ? const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.light,
+              statusBarBrightness: Brightness.dark,
+            )
+          : const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.dark,
+              statusBarBrightness: Brightness.light,
+            ),
       titleTextStyle: GoogleFonts.manrope(
         fontSize: 20,
         fontWeight: FontWeight.w700,

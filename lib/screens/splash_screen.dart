@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_routes.dart';
 
@@ -21,8 +22,17 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _navigate() async {
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenWelcome = prefs.getBool('has_seen_welcome') ?? false;
+    if (!mounted) return;
+
+    if (!hasSeenWelcome) {
+      Navigator.pushReplacementNamed(context, AppRoutes.welcome);
+      return;
+    }
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {

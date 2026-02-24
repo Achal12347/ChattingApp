@@ -34,6 +34,19 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   String _searchQuery = '';
   MessageModel? _replyToMessage;
 
+  PopupMenuItem<String> _menuItem(String value, IconData icon, String label) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 10),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -171,7 +184,14 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   }
 
   Future<void> _showReactionPicker(MessageModel message) async {
-    const emojis = ['??', '??', '??', '??', '??', '??'];
+    const emojis = [
+      '\u{1F44D}',
+      '\u{2764}\u{FE0F}',
+      '\u{1F602}',
+      '\u{1F62E}',
+      '\u{1F622}',
+      '\u{1F64F}',
+    ];
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -351,9 +371,17 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
                 );
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'settings', child: Text('Group Settings')),
-              PopupMenuItem(value: 'profile', child: Text('Group Profile')),
+            itemBuilder: (context) => [
+              _menuItem(
+                'settings',
+                Icons.settings_outlined,
+                'Group Settings',
+              ),
+              _menuItem(
+                'profile',
+                Icons.badge_outlined,
+                'Group Profile',
+              ),
             ],
           ),
         ],

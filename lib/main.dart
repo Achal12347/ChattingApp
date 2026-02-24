@@ -21,6 +21,7 @@ import 'screens/home/mood_tracking_screen.dart';
 import 'screens/home/qr_code_screen.dart';
 import 'screens/home/qr_scanner_screen.dart';
 import 'screens/home/unblock_requests_screen.dart';
+import 'screens/onboarding/welcome_screen.dart';
 import 'screens/profile/edit_profile_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/settings/privacy_settings_screen.dart';
@@ -171,6 +172,7 @@ class _ChatlyAppState extends ConsumerState<ChatlyApp> {
       initialRoute: AppRoutes.splash,
       routes: {
         AppRoutes.splash: (_) => const SplashScreen(),
+        AppRoutes.welcome: (_) => const WelcomeScreen(),
         AppRoutes.login: (_) => const LoginScreen(),
         AppRoutes.signup: (_) => const SignupScreen(),
         AppRoutes.forgotPassword: (_) => const ForgotPasswordScreen(),

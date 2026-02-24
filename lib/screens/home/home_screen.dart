@@ -76,6 +76,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  PopupMenuItem<String> _menuItem(
+    String value,
+    IconData icon,
+    String label, {
+    Color? iconColor,
+  }) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: iconColor),
+          const SizedBox(width: 10),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
   Future<void> _markAllAsRead() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -327,20 +345,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           PopupMenuButton<String>(
             tooltip: 'Menu',
             onSelected: _openMenu,
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'Create Group', child: Text('Create Group')),
-              PopupMenuItem(value: 'Edit Profile', child: Text('Edit Profile')),
-              PopupMenuItem(value: 'Settings', child: Text('Settings')),
-              PopupMenuItem(
-                value: 'Mark All as Read',
-                child: Text('Mark All as Read'),
+            itemBuilder: (context) => [
+              _menuItem(
+                'Create Group',
+                Icons.group_add_rounded,
+                'Create Group',
               ),
-              PopupMenuItem(
-                value: 'Unblock Requests',
-                child: Text('Unblock Requests'),
+              _menuItem(
+                'Edit Profile',
+                Icons.edit_outlined,
+                'Edit Profile',
               ),
-              PopupMenuDivider(),
-              PopupMenuItem(value: 'Logout', child: Text('Logout')),
+              _menuItem(
+                'Settings',
+                Icons.settings_outlined,
+                'Settings',
+              ),
+              _menuItem(
+                'Mark All as Read',
+                Icons.done_all_rounded,
+                'Mark All as Read',
+              ),
+              _menuItem(
+                'Unblock Requests',
+                Icons.mark_email_unread_outlined,
+                'Unblock Requests',
+              ),
+              const PopupMenuDivider(),
+              _menuItem(
+                'Logout',
+                Icons.logout_rounded,
+                'Logout',
+                iconColor: Colors.redAccent,
+              ),
             ],
           ),
         ],

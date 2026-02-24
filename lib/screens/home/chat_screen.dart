@@ -46,6 +46,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   String _searchQuery = '';
   MessageModel? _replyToMessage;
 
+  PopupMenuItem<String> _menuItem(
+    String value,
+    IconData icon,
+    String label, {
+    Color? iconColor,
+  }) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: iconColor),
+          const SizedBox(width: 10),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -255,7 +273,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _showReactionPicker(MessageModel message) async {
-    const emojis = ['??', '??', '??', '??', '??', '??'];
+    const emojis = [
+      '\u{1F44D}',
+      '\u{2764}\u{FE0F}',
+      '\u{1F602}',
+      '\u{1F62E}',
+      '\u{1F622}',
+      '\u{1F64F}',
+    ];
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -560,12 +585,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   break;
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'profile', child: Text('View profile')),
-              PopupMenuItem(
-                  value: 'tagRelationship', child: Text('Tag Relationship')),
-              PopupMenuDivider(),
-              PopupMenuItem(value: 'block', child: Text('Block')),
+            itemBuilder: (context) => [
+              _menuItem(
+                  'profile', Icons.person_outline_rounded, 'View profile'),
+              _menuItem(
+                'tagRelationship',
+                Icons.favorite_outline_rounded,
+                'Tag Relationship',
+              ),
+              const PopupMenuDivider(),
+              _menuItem('block', Icons.block_rounded, 'Block',
+                  iconColor: Colors.redAccent),
             ],
           ),
         ],

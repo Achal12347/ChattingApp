@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/group_service.dart';
@@ -110,6 +112,33 @@ class _GroupSettingsScreenState extends ConsumerState<GroupSettingsScreen> {
         });
       }
     }
+  }
+
+  String _buildInviteText() {
+    final code = _inviteCodeController.text.trim();
+    if (code.isEmpty) return '';
+    return 'Join my Chatly group using this invite code: $code';
+  }
+
+  Future<void> _copyInviteCode() async {
+    final text = _buildInviteText();
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Invite code copied')),
+    );
+  }
+
+  Future<void> _shareInviteCode() async {
+    final text = _buildInviteText();
+    if (text.isEmpty) return;
+    await SharePlus.instance.share(
+      ShareParams(
+        text: text,
+        subject: 'Chatly Group Invite',
+      ),
+    );
   }
 
   Future<void> _removeMember(String memberId) async {
@@ -447,11 +476,20 @@ class _GroupSettingsScreenState extends ConsumerState<GroupSettingsScreen> {
                       readOnly: true,
                       decoration: InputDecoration(
                         labelText: 'Invite Code',
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.copy),
-                          onPressed: () {
-                            // Copy to clipboard functionality would go here
-                          },
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.copy_rounded),
+                              tooltip: 'Copy invite',
+                              onPressed: _copyInviteCode,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.share_rounded),
+                              tooltip: 'Share invite',
+                              onPressed: _shareInviteCode,
+                            ),
+                          ],
                         ),
                       ),
                     ),

@@ -6,8 +6,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Latest stable AGP matching Gradle 8.2.x
-        classpath("com.android.tools.build:gradle:8.2.2")
+        classpath("com.android.tools.build:gradle:8.9.1")
 
         // Google services for Firebase integration
         classpath("com.google.gms:google-services:4.4.2")

@@ -1,15 +1,14 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../models/group_model.dart';
+import '../services/chat_preferences_service.dart';
 import '../services/chat_service.dart';
 import '../services/relationship_service.dart';
 import 'auth_provider.dart';
 import 'message_provider.dart';
 import 'relationship_provider.dart';
 
-// ignore: unused_import
-
-// ChatService provider
 final chatServiceProvider = Provider<ChatService>((ref) {
   final db = ref.watch(appDatabaseProvider);
   return ChatService(db);
@@ -24,7 +23,6 @@ final userChatsProvider =
       .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
 });
 
-// Chats stream provider
 final chatsProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
   final user = ref.watch(authStateProvider).value;
   if (user == null) return Stream.value([]);
@@ -34,11 +32,12 @@ final chatsProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
       .where('participants', arrayContains: user.uid)
       .orderBy('lastMessageAt', descending: true)
       .snapshots()
-      .map((snapshot) =>
-          snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList());
+      .map(
+        (snapshot) =>
+            snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList(),
+      );
 });
 
-// Groups provider
 final groupsProvider =
     StateNotifierProvider<GroupsNotifier, List<GroupModel>>((ref) {
   final user = ref.watch(authStateProvider).value;
@@ -56,16 +55,16 @@ class GroupsNotifier extends StateNotifier<List<GroupModel>> {
 
   Future<void> _loadGroups() async {
     if (_userId == null) return;
-    // Load groups from Firestore, filtered by membership
+
     final snapshot = await FirebaseFirestore.instance
         .collection('groups')
         .where('participants', arrayContains: _userId)
         .orderBy('lastMessageAt', descending: true)
         .get();
-    final groups = snapshot.docs
+
+    state = snapshot.docs
         .map((doc) => GroupModel.fromMap({'id': doc.id, ...doc.data()}))
         .toList();
-    state = groups;
   }
 
   Future<void> createGroup(GroupModel group) async {
@@ -80,9 +79,8 @@ class GroupsNotifier extends StateNotifier<List<GroupModel>> {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
     await groupRef.update({
-      'participants': FieldValue.arrayUnion([userId]),
+      'participants': FieldValue.arrayUnion([userId])
     });
-    // Refresh groups
     await _loadGroups();
   }
 
@@ -90,9 +88,8 @@ class GroupsNotifier extends StateNotifier<List<GroupModel>> {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
     await groupRef.update({
-      'participants': FieldValue.arrayRemove([userId]),
+      'participants': FieldValue.arrayRemove([userId])
     });
-    // Refresh groups
     await _loadGroups();
   }
 
@@ -100,9 +97,8 @@ class GroupsNotifier extends StateNotifier<List<GroupModel>> {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
     await groupRef.update({
-      'admins': FieldValue.arrayUnion([userId]),
+      'admins': FieldValue.arrayUnion([userId])
     });
-    // Refresh groups
     await _loadGroups();
   }
 
@@ -110,137 +106,174 @@ class GroupsNotifier extends StateNotifier<List<GroupModel>> {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
     await groupRef.update({
-      'admins': FieldValue.arrayRemove([userId]),
+      'admins': FieldValue.arrayRemove([userId])
     });
-    // Refresh groups
     await _loadGroups();
   }
 
   Future<void> muteGroup(String groupId, String userId) async {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
-    await groupRef.update({
-      'mutedUsers.$userId': true,
-    });
-    // Refresh groups
+    await groupRef.update({'mutedUsers.$userId': true});
     await _loadGroups();
   }
 
   Future<void> unmuteGroup(String groupId, String userId) async {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
-    await groupRef.update({
-      'mutedUsers.$userId': false,
-    });
-    // Refresh groups
+    await groupRef.update({'mutedUsers.$userId': false});
     await _loadGroups();
   }
 
   Future<void> archiveGroup(String groupId) async {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
-    await groupRef.update({
-      'isArchived': true,
-    });
-    // Refresh groups
+    await groupRef.update({'isArchived': true});
     await _loadGroups();
   }
 
   Future<void> unarchiveGroup(String groupId) async {
     final groupRef =
         FirebaseFirestore.instance.collection('groups').doc(groupId);
-    await groupRef.update({
-      'isArchived': false,
-    });
-    // Refresh groups
+    await groupRef.update({'isArchived': false});
     await _loadGroups();
   }
 
   bool isGroupAdmin(String groupId, String userId) {
-    final group = state.firstWhere((g) => g.id == groupId,
-        orElse: () => GroupModel(
-              id: '',
-              name: '',
-              description: '',
-              adminId: '',
-              participants: [],
-              admins: [],
-              createdAt: DateTime.now(),
-              lastMessage: '',
-              lastMessageAt: DateTime.now(),
-            ));
+    final group = state.firstWhere(
+      (g) => g.id == groupId,
+      orElse: () => GroupModel(
+        id: '',
+        name: '',
+        description: '',
+        adminId: '',
+        participants: const [],
+        admins: const [],
+        createdAt: DateTime.now(),
+        lastMessage: '',
+        lastMessageAt: DateTime.now(),
+      ),
+    );
     return group.admins.contains(userId);
   }
 
   bool isGroupMuted(String groupId, String userId) {
-    final group = state.firstWhere((g) => g.id == groupId,
-        orElse: () => GroupModel(
-              id: '',
-              name: '',
-              description: '',
-              adminId: '',
-              participants: [],
-              admins: [],
-              createdAt: DateTime.now(),
-              lastMessage: '',
-              lastMessageAt: DateTime.now(),
-            ));
+    final group = state.firstWhere(
+      (g) => g.id == groupId,
+      orElse: () => GroupModel(
+        id: '',
+        name: '',
+        description: '',
+        adminId: '',
+        participants: const [],
+        admins: const [],
+        createdAt: DateTime.now(),
+        lastMessage: '',
+        lastMessageAt: DateTime.now(),
+      ),
+    );
     return group.mutedUsers[userId] ?? false;
   }
 }
 
-// Pinned chats provider
-final pinnedChatsProvider =
-    StateNotifierProvider<PinnedChatsNotifier, List<String>>((ref) {
-  return PinnedChatsNotifier();
+final chatPreferencesServiceProvider = Provider<ChatPreferencesService>((ref) {
+  return ChatPreferencesService();
 });
 
-class PinnedChatsNotifier extends StateNotifier<List<String>> {
-  PinnedChatsNotifier() : super([]);
+final chatPreferencesProvider =
+    StateNotifierProvider<ChatPreferencesNotifier, ChatPreferences>((ref) {
+  return ChatPreferencesNotifier(ref.watch(chatPreferencesServiceProvider));
+});
 
-  void pinChat(String chatId) {
-    if (!state.contains(chatId)) {
-      state = [...state, chatId];
-    }
+class ChatPreferencesNotifier extends StateNotifier<ChatPreferences> {
+  final ChatPreferencesService _service;
+
+  ChatPreferencesNotifier(this._service) : super(const ChatPreferences()) {
+    _load();
   }
 
-  void unpinChat(String chatId) {
-    state = state.where((id) => id != chatId).toList();
+  Future<void> _load() async {
+    state = await _service.load();
+  }
+
+  Future<void> _persist() async {
+    await _service.save(state);
+  }
+
+  bool isPinned(String chatId) => state.pinnedChats.contains(chatId);
+
+  bool isArchived(String chatId) => state.archivedChats.contains(chatId);
+
+  bool isMuted(String chatId) => state.mutedChats.contains(chatId);
+
+  Future<void> togglePinned(String chatId) async {
+    final updated = [...state.pinnedChats];
+    if (updated.contains(chatId)) {
+      updated.remove(chatId);
+    } else {
+      updated.add(chatId);
+    }
+    state = state.copyWith(pinnedChats: updated);
+    await _persist();
+  }
+
+  Future<void> toggleArchived(String chatId) async {
+    final updatedArchived = [...state.archivedChats];
+    final updatedPinned = [...state.pinnedChats];
+
+    if (updatedArchived.contains(chatId)) {
+      updatedArchived.remove(chatId);
+    } else {
+      updatedArchived.add(chatId);
+      updatedPinned.remove(chatId);
+    }
+
+    state = state.copyWith(
+      archivedChats: updatedArchived,
+      pinnedChats: updatedPinned,
+    );
+    await _persist();
+  }
+
+  Future<void> toggleMuted(String chatId) async {
+    final updated = [...state.mutedChats];
+    if (updated.contains(chatId)) {
+      updated.remove(chatId);
+    } else {
+      updated.add(chatId);
+    }
+    state = state.copyWith(mutedChats: updated);
+    await _persist();
+  }
+
+  Future<void> clearAll() async {
+    state = const ChatPreferences();
+    await _persist();
   }
 }
 
-// Archived chats provider
-final archivedChatsProvider =
-    StateNotifierProvider<ArchivedChatsNotifier, List<String>>((ref) {
-  return ArchivedChatsNotifier();
+final pinnedChatsProvider = Provider<List<String>>((ref) {
+  return ref.watch(chatPreferencesProvider).pinnedChats;
 });
 
-class ArchivedChatsNotifier extends StateNotifier<List<String>> {
-  ArchivedChatsNotifier() : super([]);
+final archivedChatsProvider = Provider<List<String>>((ref) {
+  return ref.watch(chatPreferencesProvider).archivedChats;
+});
 
-  void archiveChat(String chatId) {
-    if (!state.contains(chatId)) {
-      state = [...state, chatId];
-    }
-  }
+final mutedChatsProvider = Provider<List<String>>((ref) {
+  return ref.watch(chatPreferencesProvider).mutedChats;
+});
 
-  void unarchiveChat(String chatId) {
-    state = state.where((id) => id != chatId).toList();
-  }
-}
-
-// Blocked users provider
 final blockedUsersProvider =
     StateNotifierProvider<BlockedUsersNotifier, List<String>>((ref) {
   final relationshipService = ref.watch(relationshipServiceProvider);
   return BlockedUsersNotifier(relationshipService);
 });
 
-// Is current user blocked by another user provider
 final isBlockedByProvider =
     FutureProvider.family<bool, String>((ref, blockerId) async {
   final relationshipService = ref.watch(relationshipServiceProvider);
-  return await relationshipService.isCurrentUserBlockedBy(blockerId);
+  return relationshipService.isCurrentUserBlockedBy(blockerId);
 });
 
 class BlockedUsersNotifier extends StateNotifier<List<String>> {
@@ -251,8 +284,7 @@ class BlockedUsersNotifier extends StateNotifier<List<String>> {
   }
 
   Future<void> _loadBlockedUsers() async {
-    final blockedUsers = await _relationshipService.getBlockedUsers();
-    state = blockedUsers;
+    state = await _relationshipService.getBlockedUsers();
   }
 
   Future<void> blockUser(String userId, String reason) async {
@@ -267,11 +299,9 @@ class BlockedUsersNotifier extends StateNotifier<List<String>> {
     state = state.where((id) => id != userId).toList();
   }
 
-  bool isUserBlocked(String userId) {
-    return state.contains(userId);
-  }
+  bool isUserBlocked(String userId) => state.contains(userId);
 
   Future<String?> getBlockReason(String userId) async {
-    return await _relationshipService.getBlockReason(userId);
+    return _relationshipService.getBlockReason(userId);
   }
 }

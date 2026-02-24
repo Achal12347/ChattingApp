@@ -36,6 +36,32 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   late final GeneratedColumn<String> content = GeneratedColumn<String>(
       'content', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _mediaUrlMeta =
+      const VerificationMeta('mediaUrl');
+  @override
+  late final GeneratedColumn<String> mediaUrl = GeneratedColumn<String>(
+      'media_url', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _mediaTypeMeta =
+      const VerificationMeta('mediaType');
+  @override
+  late final GeneratedColumn<String> mediaType = GeneratedColumn<String>(
+      'media_type', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _replyToMessageIdMeta =
+      const VerificationMeta('replyToMessageId');
+  @override
+  late final GeneratedColumn<String> replyToMessageId = GeneratedColumn<String>(
+      'reply_to_message_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _reactionsJsonMeta =
+      const VerificationMeta('reactionsJson');
+  @override
+  late final GeneratedColumn<String> reactionsJson = GeneratedColumn<String>(
+      'reactions_json', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('[]'));
   static const VerificationMeta _isSyncedMeta =
       const VerificationMeta('isSynced');
   @override
@@ -55,6 +81,16 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
       requiredDuringInsert: false,
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_deleted" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _deletedForEveryoneMeta =
+      const VerificationMeta('deletedForEveryone');
+  @override
+  late final GeneratedColumn<bool> deletedForEveryone = GeneratedColumn<bool>(
+      'deleted_for_everyone', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("deleted_for_everyone" IN (0, 1))'),
       defaultValue: const Constant(false));
   static const VerificationMeta _isUrgentMeta =
       const VerificationMeta('isUrgent');
@@ -88,8 +124,13 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         senderId,
         receiverId,
         content,
+        mediaUrl,
+        mediaType,
+        replyToMessageId,
+        reactionsJson,
         isSynced,
         isDeleted,
+        deletedForEveryone,
         isUrgent,
         status,
         createdAt
@@ -135,6 +176,26 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     } else if (isInserting) {
       context.missing(_contentMeta);
     }
+    if (data.containsKey('media_url')) {
+      context.handle(_mediaUrlMeta,
+          mediaUrl.isAcceptableOrUnknown(data['media_url']!, _mediaUrlMeta));
+    }
+    if (data.containsKey('media_type')) {
+      context.handle(_mediaTypeMeta,
+          mediaType.isAcceptableOrUnknown(data['media_type']!, _mediaTypeMeta));
+    }
+    if (data.containsKey('reply_to_message_id')) {
+      context.handle(
+          _replyToMessageIdMeta,
+          replyToMessageId.isAcceptableOrUnknown(
+              data['reply_to_message_id']!, _replyToMessageIdMeta));
+    }
+    if (data.containsKey('reactions_json')) {
+      context.handle(
+          _reactionsJsonMeta,
+          reactionsJson.isAcceptableOrUnknown(
+              data['reactions_json']!, _reactionsJsonMeta));
+    }
     if (data.containsKey('is_synced')) {
       context.handle(_isSyncedMeta,
           isSynced.isAcceptableOrUnknown(data['is_synced']!, _isSyncedMeta));
@@ -142,6 +203,12 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     if (data.containsKey('is_deleted')) {
       context.handle(_isDeletedMeta,
           isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta));
+    }
+    if (data.containsKey('deleted_for_everyone')) {
+      context.handle(
+          _deletedForEveryoneMeta,
+          deletedForEveryone.isAcceptableOrUnknown(
+              data['deleted_for_everyone']!, _deletedForEveryoneMeta));
     }
     if (data.containsKey('is_urgent')) {
       context.handle(_isUrgentMeta,
@@ -174,10 +241,20 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
           .read(DriftSqlType.string, data['${effectivePrefix}receiver_id'])!,
       content: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}content'])!,
+      mediaUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}media_url']),
+      mediaType: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}media_type']),
+      replyToMessageId: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}reply_to_message_id']),
+      reactionsJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}reactions_json'])!,
       isSynced: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_synced'])!,
       isDeleted: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_deleted'])!,
+      deletedForEveryone: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}deleted_for_everyone'])!,
       isUrgent: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_urgent'])!,
       status: attachedDatabase.typeMapping
@@ -199,8 +276,13 @@ class Message extends DataClass implements Insertable<Message> {
   final String senderId;
   final String receiverId;
   final String content;
+  final String? mediaUrl;
+  final String? mediaType;
+  final String? replyToMessageId;
+  final String reactionsJson;
   final bool isSynced;
   final bool isDeleted;
+  final bool deletedForEveryone;
   final bool isUrgent;
   final String status;
   final DateTime createdAt;
@@ -210,8 +292,13 @@ class Message extends DataClass implements Insertable<Message> {
       required this.senderId,
       required this.receiverId,
       required this.content,
+      this.mediaUrl,
+      this.mediaType,
+      this.replyToMessageId,
+      required this.reactionsJson,
       required this.isSynced,
       required this.isDeleted,
+      required this.deletedForEveryone,
       required this.isUrgent,
       required this.status,
       required this.createdAt});
@@ -223,8 +310,19 @@ class Message extends DataClass implements Insertable<Message> {
     map['sender_id'] = Variable<String>(senderId);
     map['receiver_id'] = Variable<String>(receiverId);
     map['content'] = Variable<String>(content);
+    if (!nullToAbsent || mediaUrl != null) {
+      map['media_url'] = Variable<String>(mediaUrl);
+    }
+    if (!nullToAbsent || mediaType != null) {
+      map['media_type'] = Variable<String>(mediaType);
+    }
+    if (!nullToAbsent || replyToMessageId != null) {
+      map['reply_to_message_id'] = Variable<String>(replyToMessageId);
+    }
+    map['reactions_json'] = Variable<String>(reactionsJson);
     map['is_synced'] = Variable<bool>(isSynced);
     map['is_deleted'] = Variable<bool>(isDeleted);
+    map['deleted_for_everyone'] = Variable<bool>(deletedForEveryone);
     map['is_urgent'] = Variable<bool>(isUrgent);
     map['status'] = Variable<String>(status);
     map['created_at'] = Variable<DateTime>(createdAt);
@@ -238,8 +336,19 @@ class Message extends DataClass implements Insertable<Message> {
       senderId: Value(senderId),
       receiverId: Value(receiverId),
       content: Value(content),
+      mediaUrl: mediaUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaUrl),
+      mediaType: mediaType == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaType),
+      replyToMessageId: replyToMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(replyToMessageId),
+      reactionsJson: Value(reactionsJson),
       isSynced: Value(isSynced),
       isDeleted: Value(isDeleted),
+      deletedForEveryone: Value(deletedForEveryone),
       isUrgent: Value(isUrgent),
       status: Value(status),
       createdAt: Value(createdAt),
@@ -255,8 +364,13 @@ class Message extends DataClass implements Insertable<Message> {
       senderId: serializer.fromJson<String>(json['senderId']),
       receiverId: serializer.fromJson<String>(json['receiverId']),
       content: serializer.fromJson<String>(json['content']),
+      mediaUrl: serializer.fromJson<String?>(json['mediaUrl']),
+      mediaType: serializer.fromJson<String?>(json['mediaType']),
+      replyToMessageId: serializer.fromJson<String?>(json['replyToMessageId']),
+      reactionsJson: serializer.fromJson<String>(json['reactionsJson']),
       isSynced: serializer.fromJson<bool>(json['isSynced']),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
+      deletedForEveryone: serializer.fromJson<bool>(json['deletedForEveryone']),
       isUrgent: serializer.fromJson<bool>(json['isUrgent']),
       status: serializer.fromJson<String>(json['status']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
@@ -271,8 +385,13 @@ class Message extends DataClass implements Insertable<Message> {
       'senderId': serializer.toJson<String>(senderId),
       'receiverId': serializer.toJson<String>(receiverId),
       'content': serializer.toJson<String>(content),
+      'mediaUrl': serializer.toJson<String?>(mediaUrl),
+      'mediaType': serializer.toJson<String?>(mediaType),
+      'replyToMessageId': serializer.toJson<String?>(replyToMessageId),
+      'reactionsJson': serializer.toJson<String>(reactionsJson),
       'isSynced': serializer.toJson<bool>(isSynced),
       'isDeleted': serializer.toJson<bool>(isDeleted),
+      'deletedForEveryone': serializer.toJson<bool>(deletedForEveryone),
       'isUrgent': serializer.toJson<bool>(isUrgent),
       'status': serializer.toJson<String>(status),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -285,8 +404,13 @@ class Message extends DataClass implements Insertable<Message> {
           String? senderId,
           String? receiverId,
           String? content,
+          Value<String?> mediaUrl = const Value.absent(),
+          Value<String?> mediaType = const Value.absent(),
+          Value<String?> replyToMessageId = const Value.absent(),
+          String? reactionsJson,
           bool? isSynced,
           bool? isDeleted,
+          bool? deletedForEveryone,
           bool? isUrgent,
           String? status,
           DateTime? createdAt}) =>
@@ -296,8 +420,15 @@ class Message extends DataClass implements Insertable<Message> {
         senderId: senderId ?? this.senderId,
         receiverId: receiverId ?? this.receiverId,
         content: content ?? this.content,
+        mediaUrl: mediaUrl.present ? mediaUrl.value : this.mediaUrl,
+        mediaType: mediaType.present ? mediaType.value : this.mediaType,
+        replyToMessageId: replyToMessageId.present
+            ? replyToMessageId.value
+            : this.replyToMessageId,
+        reactionsJson: reactionsJson ?? this.reactionsJson,
         isSynced: isSynced ?? this.isSynced,
         isDeleted: isDeleted ?? this.isDeleted,
+        deletedForEveryone: deletedForEveryone ?? this.deletedForEveryone,
         isUrgent: isUrgent ?? this.isUrgent,
         status: status ?? this.status,
         createdAt: createdAt ?? this.createdAt,
@@ -310,8 +441,19 @@ class Message extends DataClass implements Insertable<Message> {
       receiverId:
           data.receiverId.present ? data.receiverId.value : this.receiverId,
       content: data.content.present ? data.content.value : this.content,
+      mediaUrl: data.mediaUrl.present ? data.mediaUrl.value : this.mediaUrl,
+      mediaType: data.mediaType.present ? data.mediaType.value : this.mediaType,
+      replyToMessageId: data.replyToMessageId.present
+          ? data.replyToMessageId.value
+          : this.replyToMessageId,
+      reactionsJson: data.reactionsJson.present
+          ? data.reactionsJson.value
+          : this.reactionsJson,
       isSynced: data.isSynced.present ? data.isSynced.value : this.isSynced,
       isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
+      deletedForEveryone: data.deletedForEveryone.present
+          ? data.deletedForEveryone.value
+          : this.deletedForEveryone,
       isUrgent: data.isUrgent.present ? data.isUrgent.value : this.isUrgent,
       status: data.status.present ? data.status.value : this.status,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
@@ -326,8 +468,13 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('senderId: $senderId, ')
           ..write('receiverId: $receiverId, ')
           ..write('content: $content, ')
+          ..write('mediaUrl: $mediaUrl, ')
+          ..write('mediaType: $mediaType, ')
+          ..write('replyToMessageId: $replyToMessageId, ')
+          ..write('reactionsJson: $reactionsJson, ')
           ..write('isSynced: $isSynced, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('deletedForEveryone: $deletedForEveryone, ')
           ..write('isUrgent: $isUrgent, ')
           ..write('status: $status, ')
           ..write('createdAt: $createdAt')
@@ -336,8 +483,22 @@ class Message extends DataClass implements Insertable<Message> {
   }
 
   @override
-  int get hashCode => Object.hash(id, chatId, senderId, receiverId, content,
-      isSynced, isDeleted, isUrgent, status, createdAt);
+  int get hashCode => Object.hash(
+      id,
+      chatId,
+      senderId,
+      receiverId,
+      content,
+      mediaUrl,
+      mediaType,
+      replyToMessageId,
+      reactionsJson,
+      isSynced,
+      isDeleted,
+      deletedForEveryone,
+      isUrgent,
+      status,
+      createdAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -347,8 +508,13 @@ class Message extends DataClass implements Insertable<Message> {
           other.senderId == this.senderId &&
           other.receiverId == this.receiverId &&
           other.content == this.content &&
+          other.mediaUrl == this.mediaUrl &&
+          other.mediaType == this.mediaType &&
+          other.replyToMessageId == this.replyToMessageId &&
+          other.reactionsJson == this.reactionsJson &&
           other.isSynced == this.isSynced &&
           other.isDeleted == this.isDeleted &&
+          other.deletedForEveryone == this.deletedForEveryone &&
           other.isUrgent == this.isUrgent &&
           other.status == this.status &&
           other.createdAt == this.createdAt);
@@ -360,8 +526,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<String> senderId;
   final Value<String> receiverId;
   final Value<String> content;
+  final Value<String?> mediaUrl;
+  final Value<String?> mediaType;
+  final Value<String?> replyToMessageId;
+  final Value<String> reactionsJson;
   final Value<bool> isSynced;
   final Value<bool> isDeleted;
+  final Value<bool> deletedForEveryone;
   final Value<bool> isUrgent;
   final Value<String> status;
   final Value<DateTime> createdAt;
@@ -372,8 +543,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.senderId = const Value.absent(),
     this.receiverId = const Value.absent(),
     this.content = const Value.absent(),
+    this.mediaUrl = const Value.absent(),
+    this.mediaType = const Value.absent(),
+    this.replyToMessageId = const Value.absent(),
+    this.reactionsJson = const Value.absent(),
     this.isSynced = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.deletedForEveryone = const Value.absent(),
     this.isUrgent = const Value.absent(),
     this.status = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -385,8 +561,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     required String senderId,
     required String receiverId,
     required String content,
+    this.mediaUrl = const Value.absent(),
+    this.mediaType = const Value.absent(),
+    this.replyToMessageId = const Value.absent(),
+    this.reactionsJson = const Value.absent(),
     this.isSynced = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.deletedForEveryone = const Value.absent(),
     this.isUrgent = const Value.absent(),
     this.status = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -402,8 +583,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<String>? senderId,
     Expression<String>? receiverId,
     Expression<String>? content,
+    Expression<String>? mediaUrl,
+    Expression<String>? mediaType,
+    Expression<String>? replyToMessageId,
+    Expression<String>? reactionsJson,
     Expression<bool>? isSynced,
     Expression<bool>? isDeleted,
+    Expression<bool>? deletedForEveryone,
     Expression<bool>? isUrgent,
     Expression<String>? status,
     Expression<DateTime>? createdAt,
@@ -415,8 +601,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (senderId != null) 'sender_id': senderId,
       if (receiverId != null) 'receiver_id': receiverId,
       if (content != null) 'content': content,
+      if (mediaUrl != null) 'media_url': mediaUrl,
+      if (mediaType != null) 'media_type': mediaType,
+      if (replyToMessageId != null) 'reply_to_message_id': replyToMessageId,
+      if (reactionsJson != null) 'reactions_json': reactionsJson,
       if (isSynced != null) 'is_synced': isSynced,
       if (isDeleted != null) 'is_deleted': isDeleted,
+      if (deletedForEveryone != null)
+        'deleted_for_everyone': deletedForEveryone,
       if (isUrgent != null) 'is_urgent': isUrgent,
       if (status != null) 'status': status,
       if (createdAt != null) 'created_at': createdAt,
@@ -430,8 +622,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       Value<String>? senderId,
       Value<String>? receiverId,
       Value<String>? content,
+      Value<String?>? mediaUrl,
+      Value<String?>? mediaType,
+      Value<String?>? replyToMessageId,
+      Value<String>? reactionsJson,
       Value<bool>? isSynced,
       Value<bool>? isDeleted,
+      Value<bool>? deletedForEveryone,
       Value<bool>? isUrgent,
       Value<String>? status,
       Value<DateTime>? createdAt,
@@ -442,8 +639,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       senderId: senderId ?? this.senderId,
       receiverId: receiverId ?? this.receiverId,
       content: content ?? this.content,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
+      mediaType: mediaType ?? this.mediaType,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      reactionsJson: reactionsJson ?? this.reactionsJson,
       isSynced: isSynced ?? this.isSynced,
       isDeleted: isDeleted ?? this.isDeleted,
+      deletedForEveryone: deletedForEveryone ?? this.deletedForEveryone,
       isUrgent: isUrgent ?? this.isUrgent,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
@@ -469,11 +671,26 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (content.present) {
       map['content'] = Variable<String>(content.value);
     }
+    if (mediaUrl.present) {
+      map['media_url'] = Variable<String>(mediaUrl.value);
+    }
+    if (mediaType.present) {
+      map['media_type'] = Variable<String>(mediaType.value);
+    }
+    if (replyToMessageId.present) {
+      map['reply_to_message_id'] = Variable<String>(replyToMessageId.value);
+    }
+    if (reactionsJson.present) {
+      map['reactions_json'] = Variable<String>(reactionsJson.value);
+    }
     if (isSynced.present) {
       map['is_synced'] = Variable<bool>(isSynced.value);
     }
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
+    }
+    if (deletedForEveryone.present) {
+      map['deleted_for_everyone'] = Variable<bool>(deletedForEveryone.value);
     }
     if (isUrgent.present) {
       map['is_urgent'] = Variable<bool>(isUrgent.value);
@@ -498,8 +715,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('senderId: $senderId, ')
           ..write('receiverId: $receiverId, ')
           ..write('content: $content, ')
+          ..write('mediaUrl: $mediaUrl, ')
+          ..write('mediaType: $mediaType, ')
+          ..write('replyToMessageId: $replyToMessageId, ')
+          ..write('reactionsJson: $reactionsJson, ')
           ..write('isSynced: $isSynced, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('deletedForEveryone: $deletedForEveryone, ')
           ..write('isUrgent: $isUrgent, ')
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
@@ -526,8 +748,13 @@ typedef $$MessagesTableCreateCompanionBuilder = MessagesCompanion Function({
   required String senderId,
   required String receiverId,
   required String content,
+  Value<String?> mediaUrl,
+  Value<String?> mediaType,
+  Value<String?> replyToMessageId,
+  Value<String> reactionsJson,
   Value<bool> isSynced,
   Value<bool> isDeleted,
+  Value<bool> deletedForEveryone,
   Value<bool> isUrgent,
   Value<String> status,
   Value<DateTime> createdAt,
@@ -539,8 +766,13 @@ typedef $$MessagesTableUpdateCompanionBuilder = MessagesCompanion Function({
   Value<String> senderId,
   Value<String> receiverId,
   Value<String> content,
+  Value<String?> mediaUrl,
+  Value<String?> mediaType,
+  Value<String?> replyToMessageId,
+  Value<String> reactionsJson,
   Value<bool> isSynced,
   Value<bool> isDeleted,
+  Value<bool> deletedForEveryone,
   Value<bool> isUrgent,
   Value<String> status,
   Value<DateTime> createdAt,
@@ -571,11 +803,28 @@ class $$MessagesTableFilterComposer
   ColumnFilters<String> get content => $composableBuilder(
       column: $table.content, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<String> get mediaUrl => $composableBuilder(
+      column: $table.mediaUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get mediaType => $composableBuilder(
+      column: $table.mediaType, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get replyToMessageId => $composableBuilder(
+      column: $table.replyToMessageId,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get reactionsJson => $composableBuilder(
+      column: $table.reactionsJson, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<bool> get isSynced => $composableBuilder(
       column: $table.isSynced, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<bool> get isDeleted => $composableBuilder(
       column: $table.isDeleted, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get deletedForEveryone => $composableBuilder(
+      column: $table.deletedForEveryone,
+      builder: (column) => ColumnFilters(column));
 
   ColumnFilters<bool> get isUrgent => $composableBuilder(
       column: $table.isUrgent, builder: (column) => ColumnFilters(column));
@@ -611,11 +860,29 @@ class $$MessagesTableOrderingComposer
   ColumnOrderings<String> get content => $composableBuilder(
       column: $table.content, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get mediaUrl => $composableBuilder(
+      column: $table.mediaUrl, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get mediaType => $composableBuilder(
+      column: $table.mediaType, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get replyToMessageId => $composableBuilder(
+      column: $table.replyToMessageId,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get reactionsJson => $composableBuilder(
+      column: $table.reactionsJson,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<bool> get isSynced => $composableBuilder(
       column: $table.isSynced, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<bool> get isDeleted => $composableBuilder(
       column: $table.isDeleted, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get deletedForEveryone => $composableBuilder(
+      column: $table.deletedForEveryone,
+      builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<bool> get isUrgent => $composableBuilder(
       column: $table.isUrgent, builder: (column) => ColumnOrderings(column));
@@ -651,11 +918,26 @@ class $$MessagesTableAnnotationComposer
   GeneratedColumn<String> get content =>
       $composableBuilder(column: $table.content, builder: (column) => column);
 
+  GeneratedColumn<String> get mediaUrl =>
+      $composableBuilder(column: $table.mediaUrl, builder: (column) => column);
+
+  GeneratedColumn<String> get mediaType =>
+      $composableBuilder(column: $table.mediaType, builder: (column) => column);
+
+  GeneratedColumn<String> get replyToMessageId => $composableBuilder(
+      column: $table.replyToMessageId, builder: (column) => column);
+
+  GeneratedColumn<String> get reactionsJson => $composableBuilder(
+      column: $table.reactionsJson, builder: (column) => column);
+
   GeneratedColumn<bool> get isSynced =>
       $composableBuilder(column: $table.isSynced, builder: (column) => column);
 
   GeneratedColumn<bool> get isDeleted =>
       $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<bool> get deletedForEveryone => $composableBuilder(
+      column: $table.deletedForEveryone, builder: (column) => column);
 
   GeneratedColumn<bool> get isUrgent =>
       $composableBuilder(column: $table.isUrgent, builder: (column) => column);
@@ -695,8 +977,13 @@ class $$MessagesTableTableManager extends RootTableManager<
             Value<String> senderId = const Value.absent(),
             Value<String> receiverId = const Value.absent(),
             Value<String> content = const Value.absent(),
+            Value<String?> mediaUrl = const Value.absent(),
+            Value<String?> mediaType = const Value.absent(),
+            Value<String?> replyToMessageId = const Value.absent(),
+            Value<String> reactionsJson = const Value.absent(),
             Value<bool> isSynced = const Value.absent(),
             Value<bool> isDeleted = const Value.absent(),
+            Value<bool> deletedForEveryone = const Value.absent(),
             Value<bool> isUrgent = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
@@ -708,8 +995,13 @@ class $$MessagesTableTableManager extends RootTableManager<
             senderId: senderId,
             receiverId: receiverId,
             content: content,
+            mediaUrl: mediaUrl,
+            mediaType: mediaType,
+            replyToMessageId: replyToMessageId,
+            reactionsJson: reactionsJson,
             isSynced: isSynced,
             isDeleted: isDeleted,
+            deletedForEveryone: deletedForEveryone,
             isUrgent: isUrgent,
             status: status,
             createdAt: createdAt,
@@ -721,8 +1013,13 @@ class $$MessagesTableTableManager extends RootTableManager<
             required String senderId,
             required String receiverId,
             required String content,
+            Value<String?> mediaUrl = const Value.absent(),
+            Value<String?> mediaType = const Value.absent(),
+            Value<String?> replyToMessageId = const Value.absent(),
+            Value<String> reactionsJson = const Value.absent(),
             Value<bool> isSynced = const Value.absent(),
             Value<bool> isDeleted = const Value.absent(),
+            Value<bool> deletedForEveryone = const Value.absent(),
             Value<bool> isUrgent = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
@@ -734,8 +1031,13 @@ class $$MessagesTableTableManager extends RootTableManager<
             senderId: senderId,
             receiverId: receiverId,
             content: content,
+            mediaUrl: mediaUrl,
+            mediaType: mediaType,
+            replyToMessageId: replyToMessageId,
+            reactionsJson: reactionsJson,
             isSynced: isSynced,
             isDeleted: isDeleted,
+            deletedForEveryone: deletedForEveryone,
             isUrgent: isUrgent,
             status: status,
             createdAt: createdAt,

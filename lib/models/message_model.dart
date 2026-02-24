@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MessageModel {
@@ -44,6 +46,11 @@ class MessageModel {
   });
 
   factory MessageModel.fromMap(Map<String, dynamic> map) {
+    final rawReactions = map['reactions'];
+    final reactions = rawReactions is List
+        ? rawReactions.map((e) => e.toString()).toList()
+        : const <String>[];
+
     return MessageModel(
       id: map['id'] ?? '',
       chatId: map['chatId'] ?? '',
@@ -58,7 +65,7 @@ class MessageModel {
       status: map['status'] ?? 'sent',
       mediaUrl: map['mediaUrl'],
       mediaType: map['mediaType'],
-      reactions: List<String>.from(map['reactions'] ?? []),
+      reactions: reactions,
       isDeleted: map['isDeleted'] ?? false,
       deletedForEveryone: map['deletedForEveryone'] ?? false,
       replyToMessageId: map['replyToMessageId'],
@@ -89,6 +96,17 @@ class MessageModel {
   }
 
   factory MessageModel.fromDrift(dynamic msg) {
+    final reactions = () {
+      final raw = msg.reactionsJson;
+      if (raw == null || raw.toString().isEmpty) return const <String>[];
+      try {
+        final decoded = jsonDecode(raw.toString()) as List<dynamic>;
+        return decoded.map((e) => e.toString()).toList();
+      } catch (_) {
+        return const <String>[];
+      }
+    }();
+
     return MessageModel(
       id: msg.id,
       chatId: msg.chatId,
@@ -101,12 +119,12 @@ class MessageModel {
       isReadByReceiver: false,
       isDelivered: false,
       status: msg.status,
-      mediaUrl: null,
-      mediaType: null,
-      reactions: [],
+      mediaUrl: msg.mediaUrl,
+      mediaType: msg.mediaType,
+      reactions: reactions,
       isDeleted: msg.isDeleted,
-      deletedForEveryone: false,
-      replyToMessageId: null,
+      deletedForEveryone: msg.deletedForEveryone,
+      replyToMessageId: msg.replyToMessageId,
       isUrgent: msg.isUrgent,
     );
   }

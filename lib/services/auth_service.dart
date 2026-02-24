@@ -1,10 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import '../models/user_model.dart';
+import 'session_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final SessionService _sessionService = SessionService();
 
   // 🔹 Current Firebase user
   User? get currentUser => _auth.currentUser;
@@ -46,13 +49,11 @@ class AuthService {
         password: password,
       );
       if (cred.user != null) {
-        print('AuthService: Attempting to set user ${cred.user!.uid} online.');
         await _firestore.collection('users').doc(cred.user!.uid).update({
           'status': 'online',
           'lastSeen': FieldValue.serverTimestamp(),
         });
-        print(
-            'AuthService: User ${cred.user!.uid} status updated to online. Actual status written: online');
+        await _sessionService.startSession(cred.user!.uid);
       }
       return cred.user;
     } on FirebaseAuthException catch (e) {
@@ -87,18 +88,16 @@ class AuthService {
     final user = _auth.currentUser;
     if (user != null) {
       try {
-        print('AuthService: Attempting to set user ${user.uid} offline.');
         await _firestore.collection('users').doc(user.uid).update({
           'status': 'offline',
           'lastSeen': FieldValue.serverTimestamp(),
         });
-        print('AuthService: User ${user.uid} status updated to offline.');
+        await _sessionService.endSession(user.uid);
       } catch (e) {
-        print('AuthService: Error updating user status to offline: $e');
+        debugPrint('AuthService: Error updating user status to offline: $e');
       }
     }
     await _auth.signOut();
-    print('AuthService: User signed out.');
   }
 
   // 🔹 Update FCM Token

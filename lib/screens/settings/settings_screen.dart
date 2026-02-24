@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_routes.dart';
 import '../../core/theme/app_theme.dart';
+import '../../providers/chat_provider.dart';
 import '../../providers/settings_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -12,6 +13,8 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final settingsNotifier = ref.read(settingsProvider.notifier);
+    final chatPrefs = ref.watch(chatPreferencesProvider);
+    final chatPrefsNotifier = ref.read(chatPreferencesProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -120,6 +123,45 @@ class SettingsScreen extends ConsumerWidget {
                     onTap: () {
                       Navigator.pushNamed(context, AppRoutes.privacySettings);
                     },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _SettingsCard(
+              title: 'Chats',
+              subtitle: 'Manage pinned, muted and archived chats',
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.push_pin_outlined),
+                    title: const Text('Pinned'),
+                    trailing: Text(chatPrefs.pinnedChats.length.toString()),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.notifications_off_outlined),
+                    title: const Text('Muted'),
+                    trailing: Text(chatPrefs.mutedChats.length.toString()),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.archive_outlined),
+                    title: const Text('Archived'),
+                    trailing: Text(chatPrefs.archivedChats.length.toString()),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        chatPrefsNotifier.clearAll();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Chat preferences reset')),
+                        );
+                      },
+                      icon: const Icon(Icons.restart_alt_rounded),
+                      label: const Text('Reset chat preferences'),
+                    ),
                   ),
                 ],
               ),

@@ -34,6 +34,12 @@ dependencies:
   flutter_svg: ^2.0.10
   lottie: ^3.1.0
   animations: ^2.0.11
+  google_fonts: ^6.3.0
+  share_plus: ^11.1.0
+  record: ^6.1.2
+  audioplayers: ^6.5.0
+  encrypt: ^5.0.3
+  crypto: ^3.0.5
 
   # --- Authentication & Identity ---
   google_sign_in: ^7.1.1
@@ -97,14 +103,3 @@ flutter:
     - assets/images/
     - assets/icons/icon.png
     - assets/fonts/
-    - assets/icons/google.png
-    - assets/images/welcome/welcome_web.png
-    - assets/images/welcome/welcome_mobile.png
-    - assets/images/onboarding/web/onboard1_web.png
-    - assets/images/onboarding/web/onboard2_web.png
-    - assets/images/onboarding/web/onboard3_web.png
-    - assets/images/onboarding/web/onboard4_web.png
-    - assets/images/onboarding/mobile/onboard1_mobile.png
-    - assets/images/onboarding/mobile/onboard2_mobile.png
-    - assets/images/onboarding/mobile/onboard3_mobile.png
-    - assets/images/onboarding/mobile/onboard4_mobile.png

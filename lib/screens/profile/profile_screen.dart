@@ -7,6 +7,7 @@ import '../../app_routes.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/unblock_request_provider.dart';
 import '../../services/relationship_service.dart';
+import '../../services/report_service.dart';
 import '../../widgets/app_page_scaffold.dart';
 import '../../widgets/mood_indicator.dart';
 import '../../widgets/relationship_tag_dialog.dart';
@@ -23,9 +24,6 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final RelationshipService _relationshipService = RelationshipService();
   String? _relationTag;
-  bool _isMuted = false;
-  bool _isPinned = false;
-  bool _isArchived = false;
 
   @override
   void initState() {
@@ -89,6 +87,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final isOwnProfile =
         widget.userId == null || widget.userId == currentUser?.uid;
     final unblockRequests = ref.watch(unblockRequestProvider).unblockRequests;
+    final chatPrefs = ref.watch(chatPreferencesProvider);
+    final chatPrefsNotifier = ref.read(chatPreferencesProvider.notifier);
 
     if (profileUserId == null) {
       return AppPageScaffold(
@@ -149,6 +149,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           final mood = userData['mood']?.toString() ?? '';
           final isOnline = userData['status'] == 'online';
           final lastSeen = (userData['lastSeen'] as Timestamp?)?.toDate();
+          final directChatId = !isOwnProfile && currentUser != null
+              ? ([currentUser.uid, profileUserId]..sort()).join('_')
+              : '';
+          final isMuted = directChatId.isNotEmpty &&
+              chatPrefs.mutedChats.contains(directChatId);
+          final isPinned = directChatId.isNotEmpty &&
+              chatPrefs.pinnedChats.contains(directChatId);
+          final isArchived = directChatId.isNotEmpty &&
+              chatPrefs.archivedChats.contains(directChatId);
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -311,19 +320,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       SwitchListTile.adaptive(
                         title: const Text('Mute Notifications'),
                         secondary: const Icon(Icons.volume_off_outlined),
-                        value: _isMuted,
-                        onChanged: (value) => setState(() => _isMuted = value),
+                        value: isMuted,
+                        onChanged: (_) {
+                          if (directChatId.isNotEmpty) {
+                            chatPrefsNotifier.toggleMuted(directChatId);
+                          }
+                        },
                       ),
                       ListTile(
                         leading: const Icon(Icons.push_pin_outlined),
-                        title: Text(_isPinned ? 'Unpin Chat' : 'Pin Chat'),
-                        onTap: () => setState(() => _isPinned = !_isPinned),
+                        title: Text(isPinned ? 'Unpin Chat' : 'Pin Chat'),
+                        onTap: () {
+                          if (directChatId.isNotEmpty) {
+                            chatPrefsNotifier.togglePinned(directChatId);
+                          }
+                        },
                       ),
                       ListTile(
                         leading: const Icon(Icons.archive_outlined),
                         title: Text(
-                            _isArchived ? 'Unarchive Chat' : 'Archive Chat'),
-                        onTap: () => setState(() => _isArchived = !_isArchived),
+                            isArchived ? 'Unarchive Chat' : 'Archive Chat'),
+                        onTap: () {
+                          if (directChatId.isNotEmpty) {
+                            chatPrefsNotifier.toggleArchived(directChatId);
+                          }
+                        },
                       ),
                       ListTile(
                         leading:
@@ -354,6 +375,50 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 const SnackBar(content: Text('User unblocked')),
                               );
                             },
+                          );
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.flag_outlined,
+                            color: Colors.orange),
+                        title: const Text('Report Contact'),
+                        onTap: () async {
+                          final reasonController = TextEditingController();
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Report contact'),
+                              content: TextField(
+                                controller: reasonController,
+                                maxLines: 3,
+                                decoration:
+                                    const InputDecoration(hintText: 'Reason'),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Report'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (confirm != true || currentUser == null) return;
+                          final reason = reasonController.text.trim();
+                          if (reason.isEmpty) return;
+                          await ref.read(reportServiceProvider).reportUser(
+                                reporterId: currentUser.uid,
+                                reportedUserId: profileUserId,
+                                reason: reason,
+                              );
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Report submitted')),
                           );
                         },
                       ),

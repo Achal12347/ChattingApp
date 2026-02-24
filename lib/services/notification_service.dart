@@ -1,5 +1,38 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+class NotificationPayload {
+  final String? type;
+  final String? chatId;
+  final String? groupId;
+  final String? senderId;
+
+  const NotificationPayload({
+    this.type,
+    this.chatId,
+    this.groupId,
+    this.senderId,
+  });
+
+  factory NotificationPayload.fromMap(Map<String, dynamic> map) {
+    return NotificationPayload(
+      type: map['type']?.toString(),
+      chatId: map['chatId']?.toString(),
+      groupId: map['groupId']?.toString(),
+      senderId: map['senderId']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'type': type,
+        'chatId': chatId,
+        'groupId': groupId,
+        'senderId': senderId,
+      };
+}
 
 class NotificationService {
   static NotificationService? _instance;
@@ -10,54 +43,64 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
+  final StreamController<NotificationPayload> _tapController =
+      StreamController<NotificationPayload>.broadcast();
+
+  Stream<NotificationPayload> get onNotificationTapped => _tapController.stream;
+
   Future<void> initialize() async {
     _instance = this;
 
-    // Request permission for notifications
     await _firebaseMessaging.requestPermission();
 
-    // Initialize local notifications
-    const AndroidInitializationSettings androidSettings =
+    const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const DarwinInitializationSettings iosSettings =
-        DarwinInitializationSettings();
-    const InitializationSettings settings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
+    const iosSettings = DarwinInitializationSettings();
+    const settings =
+        InitializationSettings(android: androidSettings, iOS: iosSettings);
+
+    await _localNotifications.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (response) {
+        final payloadRaw = response.payload;
+        if (payloadRaw == null || payloadRaw.isEmpty) return;
+
+        try {
+          final payload = NotificationPayload.fromMap(jsonDecode(payloadRaw));
+          _tapController.add(payload);
+        } catch (_) {
+          // Ignore malformed payload.
+        }
+      },
     );
 
-    await _localNotifications.initialize(settings);
-
-    // Handle background messages
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-    // Handle foreground messages
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    // Show local notification
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'chat_channel',
       'Chat Notifications',
       importance: Importance.high,
       priority: Priority.high,
     );
 
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
+    const details = NotificationDetails(android: androidDetails);
+
+    final payload = NotificationPayload.fromMap(message.data);
 
     await _localNotifications.show(
-      0,
+      message.hashCode,
       message.notification?.title ?? 'New Message',
       message.notification?.body ?? '',
       details,
+      payload: jsonEncode(payload.toMap()),
     );
   }
 
   Future<String?> getFCMToken() async {
-    return await _firebaseMessaging.getToken();
+    return _firebaseMessaging.getToken();
   }
 
   Future<void> subscribeToTopic(String topic) async {
@@ -68,10 +111,8 @@ class NotificationService {
     await _firebaseMessaging.unsubscribeFromTopic(topic);
   }
 
-  // Send notification for urgent messages
   Future<void> sendUrgentNotification(String title, String body) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'urgent_channel',
       'Urgent Notifications',
       importance: Importance.max,
@@ -79,8 +120,7 @@ class NotificationService {
       sound: RawResourceAndroidNotificationSound('urgent'),
     );
 
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
+    const details = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       1,
@@ -90,61 +130,62 @@ class NotificationService {
     );
   }
 
-  // Send notification for new messages
   Future<void> sendNewMessageNotification(
       String senderId, String content) async {
-    // This method will be updated to accept username and uid for better display
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'chat_channel',
       'Chat Notifications',
       importance: Importance.high,
       priority: Priority.high,
     );
 
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
+    const details = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       2,
       'New Message from $senderId',
       content,
       details,
+      payload: jsonEncode(
+        const NotificationPayload(type: 'chat').toMap(),
+      ),
     );
   }
 
   Future<void> sendNewMessageNotificationWithUsername(
-      String username, String uid, String content) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
+    String username,
+    String uid,
+    String content,
+  ) async {
+    const androidDetails = AndroidNotificationDetails(
       'chat_channel',
       'Chat Notifications',
       importance: Importance.high,
       priority: Priority.high,
     );
 
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
+    const details = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       2,
       'New Message from $username',
       content,
       details,
+      payload: jsonEncode(
+        NotificationPayload(type: 'chat', senderId: uid).toMap(),
+      ),
     );
   }
 
   Future<void> sendUnblockRequestNotification(String fromUser) async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
+    const androidDetails = AndroidNotificationDetails(
       'unblock_request_channel',
       'Unblock Requests',
       importance: Importance.high,
       priority: Priority.high,
     );
 
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
+    const details = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       3,
@@ -153,9 +194,10 @@ class NotificationService {
       details,
     );
   }
+
+  void dispose() {
+    _tapController.close();
+  }
 }
 
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Handle background message
-  print('Handling background message: ${message.messageId}');
-}
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {}

@@ -8,8 +8,11 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
 
+import '../models/message_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/message_provider.dart';
@@ -26,6 +29,8 @@ class ChatInput extends ConsumerStatefulWidget {
   final VoidCallback? onUnblock;
   final bool isGroupChat;
   final String? groupId;
+  final MessageModel? replyToMessage;
+  final ValueChanged<MessageModel?>? onReplyChanged;
 
   const ChatInput({
     super.key,
@@ -39,6 +44,8 @@ class ChatInput extends ConsumerStatefulWidget {
     this.onUnblock,
     this.isGroupChat = false,
     this.groupId,
+    this.replyToMessage,
+    this.onReplyChanged,
   });
 
   @override
@@ -49,13 +56,17 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   final ImagePicker _imagePicker = ImagePicker();
+  final AudioRecorder _audioRecorder = AudioRecorder();
 
   bool _isSending = false;
   bool _showEmojiPicker = false;
   bool _isTyping = false;
+  bool _isRecordingVoice = false;
   Timer? _typingTimer;
+  String? _recordingPath;
 
   bool get _hasText => _controller.text.trim().isNotEmpty;
+  bool get _isInputLocked => widget.isBlockedBy || widget.isBlocking;
 
   @override
   void initState() {
@@ -88,6 +99,8 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       return;
     }
 
+    final replyId = widget.replyToMessage?.id;
+
     try {
       if (widget.isGroupChat) {
         ref.read(
@@ -95,6 +108,9 @@ class _ChatInputState extends ConsumerState<ChatInput> {
             'groupId': widget.groupId!,
             'senderId': currentUser.uid,
             'content': messageContent,
+            'mediaUrl': mediaUrl,
+            'mediaType': mediaType,
+            'replyToMessageId': replyId,
           }),
         );
       } else if (mediaUrl != null && mediaType != null) {
@@ -106,6 +122,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
             'mediaUrl': mediaUrl,
             'mediaType': mediaType,
             'caption': messageContent,
+            'replyToMessageId': replyId,
           }),
         );
       } else {
@@ -115,18 +132,19 @@ class _ChatInputState extends ConsumerState<ChatInput> {
             'senderId': currentUser.uid,
             'receiverId': widget.receiverId,
             'content': messageContent,
+            'replyToMessageId': replyId,
           }),
         );
       }
 
       _controller.clear();
       _updateTypingStatus(false);
+      widget.onReplyChanged?.call(null);
       if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send message: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to send message: $e')));
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
@@ -135,7 +153,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   void _onTextChanged(String text) {
     if (mounted) setState(() {});
 
-    if (widget.isGroupChat) return;
+    if (widget.isGroupChat || _isInputLocked) return;
     final isCurrentlyTyping = text.trim().isNotEmpty;
     if (_isTyping != isCurrentlyTyping) {
       _isTyping = isCurrentlyTyping;
@@ -144,6 +162,8 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   }
 
   void _updateTypingStatus(bool isTyping) {
+    if (widget.isGroupChat) return;
+
     final chatService = ref.read(chatServiceProvider);
     final currentUser = ref.read(authStateProvider).value;
     if (currentUser == null) return;
@@ -180,16 +200,31 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
     _controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(
-        offset: baseOffset + emoji.emoji.length,
-      ),
+      selection:
+          TextSelection.collapsed(offset: baseOffset + emoji.emoji.length),
     );
 
     _onTextChanged(_controller.text);
   }
 
+  Future<void> _sendMediaAsset(String filePath, String mediaType) async {
+    setState(() => _isSending = true);
+    try {
+      final mediaUrl = await ref
+          .read(firebaseStorageServiceProvider)
+          .uploadFile(File(filePath));
+      await _sendMessage(mediaUrl: mediaUrl, mediaType: mediaType);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Failed to send media: $e')));
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
+  }
+
   Future<void> _pickFile() async {
-    if (widget.isBlockedBy || widget.isBlocking || widget.isGroupChat) return;
+    if (_isInputLocked) return;
 
     final result = await FilePicker.platform.pickFiles();
     if (result == null || result.files.isEmpty) return;
@@ -197,83 +232,83 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     final filePath = result.files.first.path;
     if (filePath == null) return;
 
-    setState(() => _isSending = true);
-    try {
-      final mediaUrl = await ref
-          .read(firebaseStorageServiceProvider)
-          .uploadFile(File(filePath));
-      await _sendMessage(mediaUrl: mediaUrl, mediaType: 'file');
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send file: $e')));
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
+    await _sendMediaAsset(filePath, 'file');
   }
 
   Future<void> _pickImage() async {
-    if (widget.isBlockedBy || widget.isBlocking || widget.isGroupChat) return;
+    if (_isInputLocked) return;
 
     final permissionStatus = await Permission.photos.request();
     if (!permissionStatus.isGranted) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gallery permission denied')),
-      );
+          const SnackBar(content: Text('Gallery permission denied')));
       return;
     }
 
-    final pickedFile = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
-    );
+    final pickedFile =
+        await _imagePicker.pickImage(source: ImageSource.gallery);
     if (pickedFile == null) return;
 
-    setState(() => _isSending = true);
-    try {
-      final mediaUrl = await ref
-          .read(firebaseStorageServiceProvider)
-          .uploadFile(File(pickedFile.path));
-      await _sendMessage(mediaUrl: mediaUrl, mediaType: 'image');
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send image: $e')));
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
+    await _sendMediaAsset(pickedFile.path, 'image');
   }
 
   Future<void> _takePhoto() async {
-    if (widget.isBlockedBy || widget.isBlocking || widget.isGroupChat) return;
+    if (_isInputLocked) return;
 
     final permissionStatus = await Permission.camera.request();
     if (!permissionStatus.isGranted) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Camera permission denied')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission denied')));
       return;
     }
 
     final pickedFile = await _imagePicker.pickImage(source: ImageSource.camera);
     if (pickedFile == null) return;
 
-    setState(() => _isSending = true);
-    try {
-      final mediaUrl = await ref
-          .read(firebaseStorageServiceProvider)
-          .uploadFile(File(pickedFile.path));
-      await _sendMessage(mediaUrl: mediaUrl, mediaType: 'image');
-    } catch (e) {
+    await _sendMediaAsset(pickedFile.path, 'image');
+  }
+
+  Future<void> _toggleVoiceRecording() async {
+    if (_isInputLocked || _isSending) return;
+
+    if (_isRecordingVoice) {
+      final path = await _audioRecorder.stop();
+      if (mounted) {
+        setState(() {
+          _isRecordingVoice = false;
+          _recordingPath = null;
+        });
+      }
+      if (path != null && path.isNotEmpty) {
+        await _sendMediaAsset(path, 'voice');
+      }
+      return;
+    }
+
+    final permissionStatus = await Permission.microphone.request();
+    if (!permissionStatus.isGranted) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send photo: $e')));
-    } finally {
-      if (mounted) setState(() => _isSending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission denied')));
+      return;
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final filePath =
+        '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+    await _audioRecorder.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 128000),
+      path: filePath,
+    );
+
+    if (mounted) {
+      setState(() {
+        _isRecordingVoice = true;
+        _recordingPath = filePath;
+      });
     }
   }
 
@@ -321,6 +356,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   @override
   void dispose() {
     _typingTimer?.cancel();
+    _audioRecorder.dispose();
     _focusNode.dispose();
     _controller.dispose();
     super.dispose();
@@ -329,8 +365,9 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final sendingDisabled =
-        !_hasText || widget.isBlockedBy || widget.isBlocking || _isSending;
+    final canSendText = (_hasText || widget.replyToMessage != null) &&
+        !_isInputLocked &&
+        !_isSending;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -345,6 +382,52 @@ class _ChatInputState extends ConsumerState<ChatInput> {
             blockReason: widget.unblockReason,
             onUnblock: widget.onUnblock!,
           ),
+        if (widget.replyToMessage != null)
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Replying to message',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.replyToMessage!.content.isNotEmpty
+                            ? widget.replyToMessage!.content
+                            : (widget.replyToMessage!.mediaType == 'voice'
+                                ? 'Voice note'
+                                : widget.replyToMessage!.mediaType == 'image'
+                                    ? 'Photo'
+                                    : widget.replyToMessage!.mediaType == 'file'
+                                        ? 'Attachment'
+                                        : 'Message'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => widget.onReplyChanged?.call(null),
+                ),
+              ],
+            ),
+          ),
         if (_showEmojiPicker)
           SizedBox(
             height: 260,
@@ -356,6 +439,21 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                       (defaultTargetPlatform == TargetPlatform.iOS ? 1.2 : 1.0),
                 ),
               ),
+            ),
+          ),
+        if (_isRecordingVoice && _recordingPath != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: Row(
+              children: [
+                Icon(Icons.mic_rounded, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Recording voice note...')),
+                TextButton(
+                  onPressed: _toggleVoiceRecording,
+                  child: const Text('Stop & Send'),
+                ),
+              ],
             ),
           ),
         SafeArea(
@@ -388,17 +486,14 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                       ),
                       onPressed: _toggleEmojiPicker,
                     ),
-                    if (!widget.isGroupChat)
-                      IconButton(
-                        tooltip: 'Attach',
-                        icon: Icon(
-                          Icons.add_circle_outline_rounded,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        onPressed: widget.isBlockedBy || widget.isBlocking
-                            ? null
-                            : _showAttachmentSheet,
+                    IconButton(
+                      tooltip: 'Attach',
+                      icon: Icon(
+                        Icons.add_circle_outline_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
+                      onPressed: _isInputLocked ? null : _showAttachmentSheet,
+                    ),
                     Expanded(
                       child: TextField(
                         controller: _controller,
@@ -407,9 +502,9 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                         onSubmitted: (_) => _sendMessage(),
                         onChanged: _onTextChanged,
                         maxLines: null,
-                        enabled: !widget.isBlockedBy && !widget.isBlocking,
+                        enabled: !_isInputLocked,
                         decoration: InputDecoration(
-                          hintText: widget.isBlockedBy || widget.isBlocking
+                          hintText: _isInputLocked
                               ? 'Messaging disabled'
                               : widget.isGroupChat
                                   ? 'Message group'
@@ -417,9 +512,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                           border: InputBorder.none,
                           isCollapsed: true,
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 12,
-                          ),
+                              horizontal: 4, vertical: 12),
                         ),
                       ),
                     ),
@@ -428,7 +521,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                       duration: const Duration(milliseconds: 180),
                       curve: Curves.easeOut,
                       decoration: BoxDecoration(
-                        color: sendingDisabled
+                        color: _isInputLocked
                             ? theme.colorScheme.outlineVariant
                             : theme.colorScheme.primary,
                         shape: BoxShape.circle,
@@ -443,12 +536,23 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(
-                                Icons.send_rounded,
+                            : Icon(
+                                canSendText
+                                    ? Icons.send_rounded
+                                    : (_isRecordingVoice
+                                        ? Icons.stop_rounded
+                                        : Icons.mic_rounded),
                                 color: Colors.white,
                               ),
-                        onPressed:
-                            sendingDisabled ? null : () => _sendMessage(),
+                        onPressed: _isInputLocked
+                            ? null
+                            : () {
+                                if (canSendText) {
+                                  _sendMessage();
+                                } else {
+                                  _toggleVoiceRecording();
+                                }
+                              },
                       ),
                     ),
                   ],

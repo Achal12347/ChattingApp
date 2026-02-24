@@ -3,13 +3,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'session_service.dart';
+
 final appLifecycleServiceProvider = Provider<AppLifecycleService>((ref) {
-  return AppLifecycleService();
+  return AppLifecycleService(ref.read(sessionServiceProvider));
 });
 
 class AppLifecycleService with WidgetsBindingObserver {
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
+  final SessionService _sessionService;
+
+  AppLifecycleService(this._sessionService);
 
   void init() {
     WidgetsBinding.instance.addObserver(this);
@@ -29,14 +34,14 @@ class AppLifecycleService with WidgetsBindingObserver {
     switch (state) {
       case AppLifecycleState.resumed:
         _updateUserStatus(user.uid, isOnline: true);
+        _sessionService.touchSession(user.uid);
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
-        _updateUserStatus(user.uid, isOnline: false);
-        break;
       case AppLifecycleState.hidden:
-        // TODO: Handle this case.
+        _updateUserStatus(user.uid, isOnline: false);
+        _sessionService.touchSession(user.uid);
         break;
     }
   }

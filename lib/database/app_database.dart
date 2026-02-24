@@ -20,13 +20,19 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) => m.createAll(),
         onUpgrade: (m, from, to) async {
-          // Add future schema migrations here
+          if (from < 2) {
+            await m.addColumn(messages, messages.mediaUrl);
+            await m.addColumn(messages, messages.mediaType);
+            await m.addColumn(messages, messages.replyToMessageId);
+            await m.addColumn(messages, messages.reactionsJson);
+            await m.addColumn(messages, messages.deletedForEveryone);
+          }
         },
       );
 
@@ -38,6 +44,14 @@ class AppDatabase extends _$AppDatabase {
           ..where((tbl) => tbl.chatId.equals(chatId))
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .watch();
+  }
+
+  Stream<int> watchPendingMessageCount() {
+    final pendingCount = messages.id.count();
+    final query = selectOnly(messages)
+      ..addColumns([pendingCount])
+      ..where(messages.isSynced.equals(false));
+    return query.watchSingle().map((row) => row.read(pendingCount) ?? 0);
   }
 
   Future<void> markSynced(String id) async {

@@ -1,10 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_routes.dart';
+import '../../models/message_model.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/message_provider.dart';
+import '../../services/report_service.dart';
 import '../../widgets/chat_input.dart';
 import '../../widgets/message_bubble.dart';
 
@@ -27,6 +30,10 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   String _groupName = 'Loading...';
   Map<String, Map<String, dynamic>> _users = {};
 
+  bool _isSearchMode = false;
+  String _searchQuery = '';
+  MessageModel? _replyToMessage;
+
   @override
   void initState() {
     super.initState();
@@ -38,9 +45,11 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   Future<void> _initializeGroupChat() async {
     if (widget.groupId.isEmpty || widget.currentUserId.isEmpty) return;
     final chatService = ref.read(chatServiceProvider);
-    chatService.syncMessages(widget.groupId, widget.currentUserId);
     await _fetchGroupData();
-    await _markAllAsRead();
+    await chatService.markAllGroupMessagesAsRead(
+      groupId: widget.groupId,
+      currentUserId: widget.currentUserId,
+    );
   }
 
   Future<void> _fetchGroupData() async {
@@ -83,9 +92,178 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
 
   Future<void> _markAllAsRead() async {
     if (widget.groupId.isEmpty || widget.currentUserId.isEmpty) return;
-    await ref
-        .read(chatServiceProvider)
-        .markAllMessagesAsRead(widget.groupId, widget.currentUserId);
+    await ref.read(chatServiceProvider).markAllGroupMessagesAsRead(
+          groupId: widget.groupId,
+          currentUserId: widget.currentUserId,
+        );
+  }
+
+  List<MessageModel> _applySearch(List<MessageModel> messages) {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return messages;
+    return messages.where((msg) {
+      return msg.content.toLowerCase().contains(query) ||
+          (msg.mediaType?.toLowerCase().contains(query) ?? false);
+    }).toList();
+  }
+
+  Future<void> _showMessageActions(MessageModel message) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final isMine = message.senderId == widget.currentUserId;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.reply_rounded),
+                title: const Text('Reply'),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() => _replyToMessage = message);
+                },
+              ),
+              if (message.content.trim().isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.copy_rounded),
+                  title: const Text('Copy text'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await Clipboard.setData(
+                        ClipboardData(text: message.content));
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(const SnackBar(content: Text('Copied')));
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.emoji_emotions_outlined),
+                title: const Text('React'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showReactionPicker(message);
+                },
+              ),
+              if (isMine)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded),
+                  title: const Text('Delete message'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _deleteGroupMessage(message.id);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Report'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _reportMessage(message);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showReactionPicker(MessageModel message) async {
+    const emojis = ['??', '??', '??', '??', '??', '??'];
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: emojis.map((emoji) {
+                return InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final chatService = ref.read(chatServiceProvider);
+                    if (message.reactions.contains(emoji)) {
+                      await chatService.removeGroupReaction(
+                          widget.groupId, message.id, emoji);
+                    } else {
+                      await chatService.addGroupReaction(
+                          widget.groupId, message.id, emoji);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteGroupMessage(String messageId) async {
+    await FirebaseFirestore.instance
+        .collection('groups')
+        .doc(widget.groupId)
+        .collection('messages')
+        .doc(messageId)
+        .set({'isDeleted': true}, SetOptions(merge: true));
+  }
+
+  Future<void> _reportMessage(MessageModel message) async {
+    final reasonController = TextEditingController();
+    final submit = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Report message'),
+        content: TextField(
+          controller: reasonController,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: 'Reason'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Report'),
+          ),
+        ],
+      ),
+    );
+
+    if (submit != true) return;
+
+    final reason = reasonController.text.trim();
+    if (reason.isEmpty) return;
+
+    await ref.read(reportServiceProvider).reportMessage(
+          reporterId: widget.currentUserId,
+          chatId: widget.groupId,
+          messageId: message.id,
+          reason: reason,
+          isGroupChat: true,
+        );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Report submitted')));
   }
 
   @override
@@ -108,28 +286,50 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: InkWell(
-          onTap: () {
-            Navigator.pushNamed(
-              context,
-              AppRoutes.groupProfile,
-              arguments: {'groupId': widget.groupId},
-            );
-          },
-          borderRadius: BorderRadius.circular(10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(_groupName, maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text(
-                '${_users.length} members',
-                style: Theme.of(context).textTheme.labelSmall,
+        title: _isSearchMode
+            ? TextField(
+                autofocus: true,
+                onChanged: (value) => setState(() => _searchQuery = value),
+                decoration: const InputDecoration(
+                  hintText: 'Search messages',
+                  border: InputBorder.none,
+                ),
+              )
+            : InkWell(
+                onTap: () {
+                  Navigator.pushNamed(
+                    context,
+                    AppRoutes.groupProfile,
+                    arguments: {'groupId': widget.groupId},
+                  );
+                },
+                borderRadius: BorderRadius.circular(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_groupName,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(
+                      '${_users.length} members',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-        ),
         actions: [
+          IconButton(
+            icon: Icon(
+                _isSearchMode ? Icons.close_rounded : Icons.search_rounded),
+            onPressed: () {
+              setState(() {
+                if (_isSearchMode) {
+                  _searchQuery = '';
+                }
+                _isSearchMode = !_isSearchMode;
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.done_all_rounded),
             tooltip: 'Mark all as read',
@@ -174,15 +374,23 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
             Expanded(
               child: messagesAsync.when(
                 data: (messages) {
-                  if (messages.isEmpty) {
-                    return const _EmptyGroupChatView();
+                  final filteredMessages = _applySearch(messages);
+                  final byId = {
+                    for (final message in messages) message.id: message,
+                  };
+
+                  if (filteredMessages.isEmpty) {
+                    return _EmptyGroupChatView(
+                        isSearching: _searchQuery.trim().isNotEmpty);
                   }
 
-                  for (final msg in messages) {
-                    if (!msg.isRead && msg.senderId != widget.currentUserId) {
-                      ref
-                          .read(chatServiceProvider)
-                          .markMessageAsRead(widget.groupId, msg.id);
+                  for (final msg in filteredMessages) {
+                    if (msg.senderId != widget.currentUserId) {
+                      ref.read(chatServiceProvider).markGroupMessageAsRead(
+                            groupId: widget.groupId,
+                            messageId: msg.id,
+                            currentUserId: widget.currentUserId,
+                          );
                     }
                   }
 
@@ -198,10 +406,13 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
                   return ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.only(top: 10, bottom: 12),
-                    itemCount: messages.length,
+                    itemCount: filteredMessages.length,
                     itemBuilder: (_, index) {
-                      final msg = messages[index];
+                      final msg = filteredMessages[index];
                       final sender = _users[msg.senderId];
+                      final reply = msg.replyToMessageId != null
+                          ? byId[msg.replyToMessageId!]?.content
+                          : null;
                       return MessageBubble(
                         message: msg,
                         currentUserId: widget.currentUserId,
@@ -209,6 +420,8 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
                         senderName:
                             sender?['username']?.toString() ?? 'Unknown User',
                         senderAvatarUrl: sender?['profileImage']?.toString(),
+                        replyPreview: reply,
+                        onLongPress: () => _showMessageActions(msg),
                       );
                     },
                   );
@@ -222,6 +435,9 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
               receiverId: '',
               isGroupChat: true,
               groupId: widget.groupId,
+              replyToMessage: _replyToMessage,
+              onReplyChanged: (value) =>
+                  setState(() => _replyToMessage = value),
             ),
           ],
         ),
@@ -231,7 +447,9 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
 }
 
 class _EmptyGroupChatView extends StatelessWidget {
-  const _EmptyGroupChatView();
+  final bool isSearching;
+
+  const _EmptyGroupChatView({this.isSearching = false});
 
   @override
   Widget build(BuildContext context) {
@@ -250,21 +468,23 @@ class _EmptyGroupChatView extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.groups_rounded,
+                isSearching ? Icons.search_off_rounded : Icons.groups_rounded,
                 size: 38,
                 color: theme.colorScheme.onSecondaryContainer,
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              'No group messages yet',
+              isSearching ? 'No matching messages' : 'No group messages yet',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              'Start the group conversation.',
+              isSearching
+                  ? 'Try a different keyword.'
+                  : 'Start the group conversation.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

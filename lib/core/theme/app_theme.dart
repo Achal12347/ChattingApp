@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../constants.dart';
 
@@ -37,6 +38,21 @@ const List<AppThemePreset> appThemePresets = [
     label: 'Orchid Pink',
     seedColor: Color(0xFFC03A8C),
   ),
+  AppThemePreset(
+    id: 'forest',
+    label: 'Forest Green',
+    seedColor: Color(0xFF2E7D32),
+  ),
+  AppThemePreset(
+    id: 'amber',
+    label: 'Amber Gold',
+    seedColor: Color(0xFFEF6C00),
+  ),
+  AppThemePreset(
+    id: 'slate',
+    label: 'Slate Gray',
+    seedColor: Color(0xFF455A64),
+  ),
 ];
 
 AppThemePreset resolveThemePreset(String presetId) {
@@ -55,11 +71,53 @@ ThemeData _buildTheme({
     seedColor: seed,
     brightness: brightness,
   );
+  final baseTextTheme = ThemeData(brightness: brightness).textTheme;
+  final textTheme = GoogleFonts.manropeTextTheme(baseTextTheme).copyWith(
+    headlineLarge: GoogleFonts.manrope(
+      fontSize: 34,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.6,
+      color: colorScheme.onSurface,
+    ),
+    headlineMedium: GoogleFonts.manrope(
+      fontSize: 29,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.4,
+      color: colorScheme.onSurface,
+    ),
+    titleLarge: GoogleFonts.manrope(
+      fontSize: 23,
+      fontWeight: FontWeight.w700,
+      color: colorScheme.onSurface,
+    ),
+    titleMedium: GoogleFonts.manrope(
+      fontSize: 17,
+      fontWeight: FontWeight.w700,
+      color: colorScheme.onSurface,
+    ),
+    bodyLarge: GoogleFonts.nunitoSans(
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      color: colorScheme.onSurface,
+    ),
+    bodyMedium: GoogleFonts.nunitoSans(
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      color: colorScheme.onSurface,
+    ),
+    labelLarge: GoogleFonts.nunitoSans(
+      fontSize: 14,
+      fontWeight: FontWeight.w700,
+      color: colorScheme.onSurface,
+    ),
+  );
 
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
     colorScheme: colorScheme,
+    fontFamily: GoogleFonts.nunitoSans().fontFamily,
+    textTheme: textTheme,
     scaffoldBackgroundColor: brightness == Brightness.dark
         ? const Color(0xFF0F141B)
         : const Color(backgroundColorValue),
@@ -68,7 +126,7 @@ ThemeData _buildTheme({
       foregroundColor: colorScheme.onSurface,
       elevation: 0,
       scrolledUnderElevation: 0,
-      titleTextStyle: TextStyle(
+      titleTextStyle: GoogleFonts.manrope(
         fontSize: 20,
         fontWeight: FontWeight.w700,
         color: colorScheme.onSurface,
@@ -78,15 +136,6 @@ ThemeData _buildTheme({
       elevation: 0,
       color: colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-    ),
-    textTheme: const TextTheme(
-      headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
-      headlineMedium: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-      titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-      titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-      bodyLarge: TextStyle(fontSize: 16),
-      bodyMedium: TextStyle(fontSize: 14),
-      labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

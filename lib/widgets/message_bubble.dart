@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +12,8 @@ class MessageBubble extends StatelessWidget {
   final bool isGroupChat;
   final String? senderName;
   final String? senderAvatarUrl;
+  final String? replyPreview;
+  final VoidCallback? onLongPress;
 
   const MessageBubble({
     super.key,
@@ -19,6 +22,8 @@ class MessageBubble extends StatelessWidget {
     this.isGroupChat = false,
     this.senderName,
     this.senderAvatarUrl,
+    this.replyPreview,
+    this.onLongPress,
   });
 
   @override
@@ -86,112 +91,207 @@ class MessageBubble extends StatelessWidget {
                 isCurrentUser ? Alignment.centerRight : Alignment.centerLeft,
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-              child: Container(
-                margin: EdgeInsets.only(
-                  left: isCurrentUser ? 42 : 10,
-                  right: isCurrentUser ? 10 : 42,
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: isCurrentUser ? null : incomingColor,
-                  gradient: isCurrentUser ? outgoingGradient : null,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(18),
-                    topRight: const Radius.circular(18),
-                    bottomLeft: Radius.circular(isCurrentUser ? 18 : 6),
-                    bottomRight: Radius.circular(isCurrentUser ? 6 : 18),
+              child: GestureDetector(
+                onLongPress: onLongPress,
+                child: Container(
+                  margin: EdgeInsets.only(
+                    left: isCurrentUser ? 42 : 10,
+                    right: isCurrentUser ? 10 : 42,
                   ),
-                  border: isCurrentUser
-                      ? null
-                      : Border.all(
-                          color: theme.brightness == Brightness.dark
-                              ? Colors.white10
-                              : Colors.black12,
-                        ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isCurrentUser ? null : incomingColor,
+                    gradient: isCurrentUser ? outgoingGradient : null,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(18),
+                      topRight: const Radius.circular(18),
+                      bottomLeft: Radius.circular(isCurrentUser ? 18 : 6),
+                      bottomRight: Radius.circular(isCurrentUser ? 6 : 18),
                     ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (message.isUrgent)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 6),
-                        child: UrgentMessageIndicator(isUrgent: true),
+                    border: isCurrentUser
+                        ? null
+                        : Border.all(
+                            color: theme.brightness == Brightness.dark
+                                ? Colors.white10
+                                : Colors.black12,
+                          ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                    if (message.mediaType == 'image' &&
-                        message.mediaUrl != null)
-                      _ImageAttachment(url: message.mediaUrl!),
-                    if (message.mediaType == 'file' && message.mediaUrl != null)
-                      _FileAttachment(
-                        url: message.mediaUrl!,
-                        isCurrentUser: isCurrentUser,
-                      ),
-                    if ((message.mediaType == 'image' ||
-                            message.mediaType == 'file') &&
-                        message.content.isNotEmpty)
-                      const SizedBox(height: 8),
-                    if (message.isDeleted)
-                      Text(
-                        'This message was deleted',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontStyle: FontStyle.italic,
-                          color: isCurrentUser
-                              ? Colors.white.withValues(alpha: 0.82)
-                              : theme.colorScheme.onSurfaceVariant,
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (replyPreview != null &&
+                          replyPreview!.trim().isNotEmpty)
+                        _ReplyPreview(
+                          text: replyPreview!,
+                          isCurrentUser: isCurrentUser,
                         ),
-                      )
-                    else if (message.content.isNotEmpty)
-                      Text(
-                        message.content,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: isCurrentUser
-                              ? Colors.white
-                              : theme.colorScheme.onSurface,
-                          height: 1.28,
+                      if (message.isUrgent)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 6),
+                          child: UrgentMessageIndicator(isUrgent: true),
                         ),
-                      ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+                      if (message.mediaType == 'image' &&
+                          message.mediaUrl != null)
+                        _ImageAttachment(url: message.mediaUrl!),
+                      if (message.mediaType == 'file' &&
+                          message.mediaUrl != null)
+                        _FileAttachment(
+                          url: message.mediaUrl!,
+                          isCurrentUser: isCurrentUser,
+                        ),
+                      if (message.mediaType == 'voice' &&
+                          message.mediaUrl != null)
+                        _VoiceAttachment(
+                          url: message.mediaUrl!,
+                          isCurrentUser: isCurrentUser,
+                        ),
+                      if ((message.mediaType == 'image' ||
+                              message.mediaType == 'file' ||
+                              message.mediaType == 'voice') &&
+                          message.content.isNotEmpty)
+                        const SizedBox(height: 8),
+                      if (message.isDeleted)
                         Text(
-                          DateFormat('h:mm a').format(message.createdAt),
-                          style: theme.textTheme.labelSmall?.copyWith(
+                          'This message was deleted',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontStyle: FontStyle.italic,
                             color: isCurrentUser
-                                ? Colors.white.withValues(alpha: 0.75)
+                                ? Colors.white.withValues(alpha: 0.82)
                                 : theme.colorScheme.onSurfaceVariant,
                           ),
-                        ),
-                        if (isCurrentUser && !isGroupChat) ...[
-                          const SizedBox(width: 4),
-                          Icon(
-                            message.status == 'sent'
-                                ? Icons.done_rounded
-                                : Icons.done_all_rounded,
-                            size: 15,
-                            color: message.status == 'read'
-                                ? const Color(0xFF4FC3F7)
-                                : Colors.white.withValues(alpha: 0.76),
+                        )
+                      else if (message.content.isNotEmpty)
+                        Text(
+                          message.content,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: isCurrentUser
+                                ? Colors.white
+                                : theme.colorScheme.onSurface,
+                            height: 1.28,
                           ),
-                        ],
+                        ),
+                      if (message.reactions.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _ReactionStrip(
+                          reactions: message.reactions,
+                          isCurrentUser: isCurrentUser,
+                        ),
                       ],
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            DateFormat('h:mm a').format(message.createdAt),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: isCurrentUser
+                                  ? Colors.white.withValues(alpha: 0.75)
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          if (isCurrentUser && !isGroupChat) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              message.status == 'sent'
+                                  ? Icons.done_rounded
+                                  : Icons.done_all_rounded,
+                              size: 15,
+                              color: message.status == 'read'
+                                  ? const Color(0xFF4FC3F7)
+                                  : Colors.white.withValues(alpha: 0.76),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ReplyPreview extends StatelessWidget {
+  final String text;
+  final bool isCurrentUser;
+
+  const _ReplyPreview({required this.text, required this.isCurrentUser});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: isCurrentUser
+            ? Colors.white.withValues(alpha: 0.16)
+            : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border(
+          left: BorderSide(
+            color: isCurrentUser
+                ? Colors.white.withValues(alpha: 0.7)
+                : theme.colorScheme.primary,
+            width: 3,
+          ),
+        ),
+      ),
+      child: Text(
+        text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: isCurrentUser
+              ? Colors.white.withValues(alpha: 0.9)
+              : theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _ReactionStrip extends StatelessWidget {
+  final List<String> reactions;
+  final bool isCurrentUser;
+
+  const _ReactionStrip({required this.reactions, required this.isCurrentUser});
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = <String, int>{};
+    for (final reaction in reactions) {
+      grouped[reaction] = (grouped[reaction] ?? 0) + 1;
+    }
+
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: grouped.entries.map((entry) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: isCurrentUser
+                ? Colors.white.withValues(alpha: 0.2)
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text('${entry.key} ${entry.value}'),
+        );
+      }).toList(),
     );
   }
 }
@@ -256,9 +356,8 @@ class _FileAttachment extends StatelessWidget {
           return;
         }
         if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Unable to open file')));
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Unable to open file')));
         }
       },
       child: Container(
@@ -278,6 +377,77 @@ class _FileAttachment extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _VoiceAttachment extends StatefulWidget {
+  final String url;
+  final bool isCurrentUser;
+
+  const _VoiceAttachment({required this.url, required this.isCurrentUser});
+
+  @override
+  State<_VoiceAttachment> createState() => _VoiceAttachmentState();
+}
+
+class _VoiceAttachmentState extends State<_VoiceAttachment> {
+  final AudioPlayer _player = AudioPlayer();
+  bool _isPlaying = false;
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isPlaying) {
+      await _player.pause();
+      if (mounted) setState(() => _isPlaying = false);
+      return;
+    }
+
+    await _player.play(UrlSource(widget.url));
+    if (mounted) setState(() => _isPlaying = true);
+
+    _player.onPlayerComplete.first.then((_) {
+      if (mounted) setState(() => _isPlaying = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final background = widget.isCurrentUser
+        ? Colors.white.withValues(alpha: 0.2)
+        : theme.colorScheme.surfaceContainerHighest;
+    final foreground = widget.isCurrentUser
+        ? Colors.white
+        : theme.colorScheme.onSurfaceVariant;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: _togglePlay,
+            icon: Icon(
+              _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill,
+              color: foreground,
+            ),
+          ),
+          Text(
+            _isPlaying ? 'Playing...' : 'Voice note',
+            style: theme.textTheme.bodyMedium?.copyWith(color: foreground),
+          ),
+        ],
       ),
     );
   }

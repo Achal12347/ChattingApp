@@ -9,6 +9,7 @@ import '../../database/app_database.dart';
 import '../../models/group_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/message_provider.dart';
 import '../../services/chat_service.dart';
 import '../../services/group_service.dart';
 import '../../widgets/mood_selector.dart';
@@ -21,6 +22,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _showArchived = false;
+
   String _formatLastSeen(DateTime? lastSeen) {
     if (lastSeen == null) return 'Offline';
     final now = DateTime.now();
@@ -177,6 +180,82 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.invalidate(groupsProvider);
   }
 
+  Future<void> _showConversationActions({
+    required String id,
+    required bool isGroup,
+    required String title,
+    GroupModel? group,
+  }) async {
+    final prefs = ref.read(chatPreferencesProvider);
+    final chatPrefsNotifier = ref.read(chatPreferencesProvider.notifier);
+    final isPinned = prefs.pinnedChats.contains(id);
+    final isArchived = prefs.archivedChats.contains(id);
+    final isMuted = prefs.mutedChats.contains(id);
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(isPinned
+                    ? Icons.push_pin_rounded
+                    : Icons.push_pin_outlined),
+                title: Text(isPinned ? 'Unpin' : 'Pin to top'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await chatPrefsNotifier.togglePinned(id);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  isArchived ? Icons.unarchive_rounded : Icons.archive_outlined,
+                ),
+                title: Text(isArchived ? 'Unarchive' : 'Archive'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await chatPrefsNotifier.toggleArchived(id);
+                },
+              ),
+              ListTile(
+                leading: Icon(isMuted
+                    ? Icons.notifications_active
+                    : Icons.notifications_off_outlined),
+                title: Text(isMuted ? 'Unmute' : 'Mute'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await chatPrefsNotifier.toggleMuted(id);
+                },
+              ),
+              if (!isGroup)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded),
+                  title: const Text('Delete chat'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _deleteChat(id, title);
+                  },
+                ),
+              if (isGroup && group != null && currentUserId.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.exit_to_app_rounded),
+                  title: const Text('Leave group'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _leaveGroup(group, currentUserId);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -235,6 +314,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               Navigator.of(context).pushNamed(AppRoutes.qrCode);
             },
           ),
+          IconButton(
+            icon: Icon(
+              _showArchived ? Icons.unarchive_rounded : Icons.archive_outlined,
+            ),
+            tooltip:
+                _showArchived ? 'Show active chats' : 'Show archived chats',
+            onPressed: () {
+              setState(() => _showArchived = !_showArchived);
+            },
+          ),
           PopupMenuButton<String>(
             tooltip: 'Menu',
             onSelected: _openMenu,
@@ -265,10 +354,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
           final chatsAsync = ref.watch(chatsProvider);
           final groups = ref.watch(groupsProvider);
+          final chatPrefs = ref.watch(chatPreferencesProvider);
+          final pendingCountAsync = ref.watch(pendingMessageCountProvider);
 
           return chatsAsync.when(
             data: (chats) {
-              if (chats.isEmpty && groups.isEmpty) {
+              final visibleChats = chats.where((chat) {
+                final id = chat['id']?.toString() ?? '';
+                final archived = chatPrefs.archivedChats.contains(id);
+                return _showArchived ? archived : !archived;
+              }).toList();
+
+              final visibleGroups = groups.where((group) {
+                final archived = chatPrefs.archivedChats.contains(group.id);
+                return _showArchived ? archived : !archived;
+              }).toList();
+
+              if (visibleChats.isEmpty && visibleGroups.isEmpty) {
                 return _EmptyChatState(
                   onSearchPressed: () {
                     showSearch(
@@ -280,8 +382,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               }
 
               final combined = <Map<String, dynamic>>[
-                ...chats.map((c) => {'type': 'chat', 'data': c}),
-                ...groups.map((g) => {'type': 'group', 'data': g}),
+                ...visibleChats.map((c) => {
+                      'type': 'chat',
+                      'id': c['id']?.toString() ?? '',
+                      'data': c,
+                    }),
+                ...visibleGroups.map((g) => {
+                      'type': 'group',
+                      'id': g.id,
+                      'data': g,
+                    }),
               ];
 
               combined.sort((a, b) {
@@ -304,8 +414,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   bTime = (b['data'] as GroupModel).lastMessageAt;
                 }
 
+                final aId = a['id']?.toString() ?? '';
+                final bId = b['id']?.toString() ?? '';
+                final aPinned = chatPrefs.pinnedChats.contains(aId);
+                final bPinned = chatPrefs.pinnedChats.contains(bId);
+                if (aPinned != bPinned) {
+                  return bPinned ? 1 : -1;
+                }
+
                 return (bTime ?? DateTime.fromMillisecondsSinceEpoch(0))
-                    .compareTo(aTime ?? DateTime.fromMillisecondsSinceEpoch(0));
+                    .compareTo(
+                  aTime ?? DateTime.fromMillisecondsSinceEpoch(0),
+                );
               });
 
               _startSyncForAllChats(chats);
@@ -321,115 +441,184 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     end: Alignment.bottomCenter,
                   ),
                 ),
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  itemCount: combined.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final item = combined[index];
-                    if (item['type'] == 'chat') {
-                      final chat = item['data'] as Map<String, dynamic>;
-                      final participants = List<String>.from(
-                        chat['participants'] ?? [],
-                      );
-                      final otherUserId = participants.firstWhere(
-                        (id) => id != user.uid && id.isNotEmpty,
-                        orElse: () => '',
-                      );
+                child: Column(
+                  children: [
+                    pendingCountAsync.when(
+                      data: (count) {
+                        if (count <= 0) return const SizedBox.shrink();
+                        return Container(
+                          margin: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color:
+                                Theme.of(context).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.cloud_off_rounded,
+                                size: 16,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onPrimaryContainer,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '$count message(s) waiting for sync',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onPrimaryContainer,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        itemCount: combined.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final item = combined[index];
+                          final itemId = item['id']?.toString() ?? '';
+                          final isPinned =
+                              chatPrefs.pinnedChats.contains(itemId);
+                          final isMuted = chatPrefs.mutedChats.contains(itemId);
+                          if (item['type'] == 'chat') {
+                            final chat = item['data'] as Map<String, dynamic>;
+                            final participants = List<String>.from(
+                              chat['participants'] ?? [],
+                            );
+                            final otherUserId = participants.firstWhere(
+                              (id) => id != user.uid && id.isNotEmpty,
+                              orElse: () => '',
+                            );
 
-                      if (otherUserId.isEmpty) return const SizedBox.shrink();
+                            if (otherUserId.isEmpty)
+                              return const SizedBox.shrink();
 
-                      final unreadCount = (chat['unreadCount']
-                              as Map<String, dynamic>?)?[user.uid] ??
-                          0;
-                      final lastMessage = chat['lastMessage']?.toString() ?? '';
-                      final lastMessageAt =
-                          (chat['lastMessageAt'] as Timestamp?)?.toDate();
+                            final unreadCount = (chat['unreadCount']
+                                    as Map<String, dynamic>?)?[user.uid] ??
+                                0;
+                            final lastMessage =
+                                chat['lastMessage']?.toString() ?? '';
+                            final lastMessageAt =
+                                (chat['lastMessageAt'] as Timestamp?)?.toDate();
 
-                      return StreamBuilder<DocumentSnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(otherUserId)
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const _ConversationTilePlaceholder();
+                            return StreamBuilder<DocumentSnapshot>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(otherUserId)
+                                  .snapshots(),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData) {
+                                  return const _ConversationTilePlaceholder();
+                                }
+
+                                final userData = snapshot.data!.data()
+                                    as Map<String, dynamic>?;
+                                final username =
+                                    userData?['username']?.toString() ??
+                                        'Unknown User';
+                                final profilePhotoUrl =
+                                    userData?['profileImage']?.toString() ?? '';
+                                final mood =
+                                    userData?['mood']?.toString() ?? '';
+                                final userStatus =
+                                    userData?['status']?.toString() ??
+                                        'offline';
+                                final lastSeen =
+                                    (userData?['lastSeen'] as Timestamp?)
+                                        ?.toDate();
+
+                                final subtitle = lastMessage.trim().isNotEmpty
+                                    ? lastMessage
+                                    : (userStatus == 'online'
+                                        ? 'Online'
+                                        : _formatLastSeen(lastSeen));
+
+                                return _ConversationTile(
+                                  title: username,
+                                  subtitle: subtitle,
+                                  timeText: _formatTileTime(lastMessageAt),
+                                  avatarUrl: profilePhotoUrl,
+                                  badgeText: unreadCount > 0
+                                      ? unreadCount.toString()
+                                      : null,
+                                  moodText: mood.isNotEmpty ? mood : null,
+                                  isOnline: userStatus == 'online',
+                                  isPinned: isPinned,
+                                  isMuted: isMuted,
+                                  onTap: () async {
+                                    await Navigator.pushNamed(
+                                      context,
+                                      AppRoutes.chat,
+                                      arguments: {
+                                        'chatId': chat['id'] ?? '',
+                                        'receiverId': otherUserId,
+                                        'currentUserId': user.uid,
+                                      },
+                                    );
+                                    ref.invalidate(chatsProvider);
+                                  },
+                                  onLongPress: () => _showConversationActions(
+                                    id: chat['id']?.toString() ?? '',
+                                    isGroup: false,
+                                    title: username,
+                                  ),
+                                );
+                              },
+                            );
                           }
 
-                          final userData =
-                              snapshot.data!.data() as Map<String, dynamic>?;
-                          final username = userData?['username']?.toString() ??
-                              'Unknown User';
-                          final profilePhotoUrl =
-                              userData?['profileImage']?.toString() ?? '';
-                          final mood = userData?['mood']?.toString() ?? '';
-                          final userStatus =
-                              userData?['status']?.toString() ?? 'offline';
-                          final lastSeen =
-                              (userData?['lastSeen'] as Timestamp?)?.toDate();
-
-                          final subtitle = lastMessage.trim().isNotEmpty
-                              ? lastMessage
-                              : (userStatus == 'online'
-                                  ? 'Online'
-                                  : _formatLastSeen(lastSeen));
-
+                          final group = item['data'] as GroupModel;
                           return _ConversationTile(
-                            title: username,
-                            subtitle: subtitle,
-                            timeText: _formatTileTime(lastMessageAt),
-                            avatarUrl: profilePhotoUrl,
-                            badgeText:
-                                unreadCount > 0 ? unreadCount.toString() : null,
-                            moodText: mood.isNotEmpty ? mood : null,
-                            isOnline: userStatus == 'online',
-                            onTap: () async {
-                              await Navigator.pushNamed(
+                            title: group.name,
+                            subtitle: group.lastMessage.isNotEmpty
+                                ? group.lastMessage
+                                : '${group.participants.length} members',
+                            timeText: _formatTileTime(group.lastMessageAt),
+                            avatarUrl: group.avatarUrl ?? '',
+                            badgeText: 'Group',
+                            isGroup: true,
+                            isPinned: isPinned,
+                            isMuted: isMuted,
+                            onTap: () {
+                              Navigator.pushNamed(
                                 context,
-                                AppRoutes.chat,
+                                AppRoutes.groupChat,
                                 arguments: {
-                                  'chatId': chat['id'] ?? '',
-                                  'receiverId': otherUserId,
+                                  'groupId': group.id,
                                   'currentUserId': user.uid,
                                 },
                               );
-                              ref.invalidate(chatsProvider);
                             },
-                            onLongPress: () => _deleteChat(
-                              chat['id']?.toString() ?? '',
-                              username,
+                            onLongPress: () => _showConversationActions(
+                              id: group.id,
+                              isGroup: true,
+                              title: group.name,
+                              group: group,
                             ),
                           );
                         },
-                      );
-                    }
-
-                    final group = item['data'] as GroupModel;
-                    return _ConversationTile(
-                      title: group.name,
-                      subtitle: group.lastMessage.isNotEmpty
-                          ? group.lastMessage
-                          : '${group.participants.length} members',
-                      timeText: _formatTileTime(group.lastMessageAt),
-                      avatarUrl: group.avatarUrl ?? '',
-                      badgeText: 'Group',
-                      isGroup: true,
-                      onTap: () {
-                        Navigator.pushNamed(
-                          context,
-                          AppRoutes.groupChat,
-                          arguments: {
-                            'groupId': group.id,
-                            'currentUserId': user.uid,
-                          },
-                        );
-                      },
-                      onLongPress: () => _leaveGroup(group, user.uid),
-                    );
-                  },
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -451,6 +640,8 @@ class _ConversationTile extends StatelessWidget {
   final String? moodText;
   final bool isOnline;
   final bool isGroup;
+  final bool isPinned;
+  final bool isMuted;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
 
@@ -464,6 +655,8 @@ class _ConversationTile extends StatelessWidget {
     this.moodText,
     this.isOnline = false,
     this.isGroup = false,
+    this.isPinned = false,
+    this.isMuted = false,
     this.onLongPress,
   });
 
@@ -527,6 +720,15 @@ class _ConversationTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
+                        if (isPinned)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: Icon(
+                              Icons.push_pin_rounded,
+                              size: 14,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
                         Expanded(
                           child: Text(
                             title,
@@ -586,6 +788,15 @@ class _ConversationTile extends StatelessWidget {
                               : theme.colorScheme.onPrimary,
                           fontWeight: FontWeight.w700,
                         ),
+                      ),
+                    ),
+                  if (isMuted)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Icon(
+                        Icons.notifications_off_rounded,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                 ],

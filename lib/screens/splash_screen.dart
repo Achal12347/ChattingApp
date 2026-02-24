@@ -1,8 +1,10 @@
 import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../app_routes.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -38,9 +40,48 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              scheme.primaryContainer.withValues(alpha: 0.6),
+              Theme.of(context).scaffoldBackgroundColor,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 42,
+                backgroundColor: scheme.primary,
+                child: Icon(
+                  Icons.chat_rounded,
+                  size: 40,
+                  color: scheme.onPrimary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Chatly',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              const SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -5,7 +5,7 @@ import '../models/unblock_request_model.dart';
 import '../services/relationship_service.dart';
 
 class UnblockRequestsList extends ConsumerStatefulWidget {
-  const UnblockRequestsList({Key? key}) : super(key: key);
+  const UnblockRequestsList({super.key});
 
   @override
   ConsumerState<UnblockRequestsList> createState() =>
@@ -78,15 +78,16 @@ class _UnblockRequestsListState extends ConsumerState<UnblockRequestsList> {
   }
 
   Color _getRelationshipColor(String relationship) {
+    final scheme = Theme.of(context).colorScheme;
     switch (relationship) {
       case 'friend':
-        return Colors.blue;
+        return scheme.primary;
       case 'best_friend':
-        return Colors.purple;
+        return scheme.tertiary;
       case 'family':
         return Colors.green;
       default:
-        return Colors.grey;
+        return scheme.outline;
     }
   }
 
@@ -122,7 +123,8 @@ class _UnblockRequestsListState extends ConsumerState<UnblockRequestsList> {
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  color: _getRelationshipColor(relationship).withOpacity(0.1),
+                  color: _getRelationshipColor(relationship)
+                      .withValues(alpha: 0.12),
                   child: Row(
                     children: [
                       Icon(
@@ -182,7 +184,9 @@ class _UnblockRequestsListState extends ConsumerState<UnblockRequestsList> {
                               'Requested: ${_formatDate(request.createdAt)}',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             ),
                           ],

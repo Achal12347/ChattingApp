@@ -51,7 +51,8 @@ class AuthService {
           'status': 'online',
           'lastSeen': FieldValue.serverTimestamp(),
         });
-        print('AuthService: User ${cred.user!.uid} status updated to online. Actual status written: online');
+        print(
+            'AuthService: User ${cred.user!.uid} status updated to online. Actual status written: online');
       }
       return cred.user;
     } on FirebaseAuthException catch (e) {

@@ -63,8 +63,10 @@ class DefaultFirebaseOptions {
     messagingSenderId: '687279755567',
     projectId: 'chatly-3ca5c',
     storageBucket: 'chatly-3ca5c.firebasestorage.app',
-    androidClientId: '687279755567-o4sptrns56ad094l53ksd9bu3cqlpfov.apps.googleusercontent.com',
-    iosClientId: '687279755567-f7roreqsrml36ofmkm57t7u7f2tnaeee.apps.googleusercontent.com',
+    androidClientId:
+        '687279755567-o4sptrns56ad094l53ksd9bu3cqlpfov.apps.googleusercontent.com',
+    iosClientId:
+        '687279755567-f7roreqsrml36ofmkm57t7u7f2tnaeee.apps.googleusercontent.com',
     iosBundleId: 'com.example.chatlyapp',
   );
 
@@ -74,8 +76,10 @@ class DefaultFirebaseOptions {
     messagingSenderId: '687279755567',
     projectId: 'chatly-3ca5c',
     storageBucket: 'chatly-3ca5c.firebasestorage.app',
-    androidClientId: '687279755567-o4sptrns56ad094l53ksd9bu3cqlpfov.apps.googleusercontent.com',
-    iosClientId: '687279755567-f7roreqsrml36ofmkm57t7u7f2tnaeee.apps.googleusercontent.com',
+    androidClientId:
+        '687279755567-o4sptrns56ad094l53ksd9bu3cqlpfov.apps.googleusercontent.com',
+    iosClientId:
+        '687279755567-f7roreqsrml36ofmkm57t7u7f2tnaeee.apps.googleusercontent.com',
     iosBundleId: 'com.example.chatlyapp',
   );
 
@@ -87,5 +91,4 @@ class DefaultFirebaseOptions {
     authDomain: 'chatly-3ca5c.firebaseapp.com',
     storageBucket: 'chatly-3ca5c.firebasestorage.app',
   );
-
 }

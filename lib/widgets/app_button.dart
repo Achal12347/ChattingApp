@@ -26,26 +26,30 @@ class AppButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return SizedBox(
       width: width,
       height: height ?? 48.0,
       child: ElevatedButton(
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: backgroundColor ?? Theme.of(context).primaryColor,
-          foregroundColor: textColor ?? Colors.white,
+          elevation: 0,
+          backgroundColor: backgroundColor ?? scheme.primary,
+          foregroundColor: textColor ?? scheme.onPrimary,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(borderRadius),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         ),
         child: isLoading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                      textColor ?? scheme.onPrimary),
                 ),
               )
             : Row(
@@ -58,7 +62,7 @@ class AppButton extends StatelessWidget {
                   Text(
                     text,
                     style: TextStyle(
-                      color: textColor ?? Colors.white,
+                      color: textColor ?? scheme.onPrimary,
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),

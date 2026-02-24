@@ -109,11 +109,14 @@ class _ChatlyAppState extends ConsumerState<ChatlyApp> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final selectedThemeMode = resolveThemeMode(settings.themeMode);
 
     return MaterialApp(
       title: 'Chatly',
       debugShowCheckedModeBanner: false,
-      theme: settings.isDarkMode ? darkTheme : lightTheme,
+      theme: getLightTheme(settings.themePreset),
+      darkTheme: getDarkTheme(settings.themePreset),
+      themeMode: selectedThemeMode,
       initialRoute: AppRoutes.splash,
       routes: {
         AppRoutes.splash: (_) => const SplashScreen(),

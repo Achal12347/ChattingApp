@@ -1,8 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../../providers/auth_provider.dart';
-import '../../services/mood_service.dart';
+import '../../widgets/app_page_scaffold.dart';
 
 class MoodTrackingScreen extends ConsumerStatefulWidget {
   const MoodTrackingScreen({super.key});
@@ -12,7 +13,6 @@ class MoodTrackingScreen extends ConsumerStatefulWidget {
 }
 
 class _MoodTrackingScreenState extends ConsumerState<MoodTrackingScreen> {
-  final MoodService _moodService = MoodService();
   Map<String, int> _moodStats = {};
 
   @override
@@ -40,99 +40,95 @@ class _MoodTrackingScreenState extends ConsumerState<MoodTrackingScreen> {
         stats[mood] = (stats[mood] ?? 0) + 1;
       }
 
-      setState(() {
-        _moodStats = stats;
-      });
-    } catch (e) {
-      // Handle error
-    }
+      if (mounted) setState(() => _moodStats = stats);
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mood Tracking'),
-        backgroundColor: Theme.of(context).primaryColor,
-      ),
-      body: SingleChildScrollView(
+    return AppPageScaffold(
+      appBar: AppBar(title: const Text('Mood Tracking')),
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Your Mood Statistics',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+        children: [
+          AppSectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your Mood Statistics',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 14),
+                if (_moodStats.isEmpty)
+                  const Center(child: Text('No mood data available yet'))
+                else
+                  ..._buildMoodStats(),
+              ],
             ),
-            const SizedBox(height: 20),
-            if (_moodStats.isEmpty)
-              const Center(
-                child: Text('No mood data available yet'),
-              )
-            else
-              ..._buildMoodStats(),
-            const SizedBox(height: 30),
-            const Text(
-              'Recent Mood History',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+          ),
+          const SizedBox(height: 12),
+          AppSectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Recent Mood History',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 10),
+                _buildMoodHistory(),
+              ],
             ),
-            const SizedBox(height: 10),
-            _buildMoodHistory(),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   List<Widget> _buildMoodStats() {
-    final total = _moodStats.values.reduce((a, b) => a + b);
+    final total = _moodStats.values.fold<int>(0, (a, b) => a + b);
+    if (total == 0) return const [];
+
     return _moodStats.entries.map((entry) {
       final percentage = (entry.value / total * 100).round();
-      return Card(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(
-                _getMoodIcon(entry.key),
-                color: _getMoodColor(entry.key),
-                size: 32,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.key.toUpperCase(),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    Text('${entry.value} times ($percentage%)'),
-                  ],
-                ),
-              ),
-              SizedBox(
-                width: 100,
-                child: LinearProgressIndicator(
-                  value: entry.value / total,
-                  backgroundColor: Colors.grey.shade200,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    _getMoodColor(entry.key),
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          children: [
+            Icon(_getMoodIcon(entry.key),
+                color: _getMoodColor(entry.key), size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.key.toUpperCase(),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  Text('${entry.value} times ($percentage%)'),
+                ],
+              ),
+            ),
+            SizedBox(
+              width: 92,
+              child: LinearProgressIndicator(
+                value: entry.value / total,
+                borderRadius: BorderRadius.circular(12),
+                minHeight: 7,
+                backgroundColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _getMoodColor(entry.key),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }).toList();
@@ -154,7 +150,6 @@ class _MoodTrackingScreenState extends ConsumerState<MoodTrackingScreen> {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-
         final docs = snapshot.data!.docs;
         if (docs.isEmpty) {
           return const Center(child: Text('No mood history yet'));
@@ -168,12 +163,8 @@ class _MoodTrackingScreenState extends ConsumerState<MoodTrackingScreen> {
             final data = docs[index].data() as Map<String, dynamic>;
             final mood = data['mood'] as String;
             final timestamp = (data['timestamp'] as Timestamp).toDate();
-
             return ListTile(
-              leading: Icon(
-                _getMoodIcon(mood),
-                color: _getMoodColor(mood),
-              ),
+              leading: Icon(_getMoodIcon(mood), color: _getMoodColor(mood)),
               title: Text(mood.toUpperCase()),
               subtitle: Text(
                 '${timestamp.day}/${timestamp.month}/${timestamp.year} ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
@@ -188,22 +179,22 @@ class _MoodTrackingScreenState extends ConsumerState<MoodTrackingScreen> {
   IconData _getMoodIcon(String mood) {
     switch (mood) {
       case 'happy':
-        return Icons.sentiment_very_satisfied;
+        return Icons.sentiment_very_satisfied_rounded;
       case 'sad':
-        return Icons.sentiment_dissatisfied;
+        return Icons.sentiment_dissatisfied_rounded;
       case 'tired':
-        return Icons.sentiment_neutral;
+        return Icons.bedtime_outlined;
       case 'angry':
-        return Icons.sentiment_very_dissatisfied;
+        return Icons.sentiment_very_dissatisfied_rounded;
       default:
-        return Icons.sentiment_neutral;
+        return Icons.sentiment_neutral_rounded;
     }
   }
 
   Color _getMoodColor(String mood) {
     switch (mood) {
       case 'happy':
-        return Colors.yellow.shade600;
+        return Colors.amber.shade700;
       case 'sad':
         return Colors.blue.shade600;
       case 'tired':
@@ -211,7 +202,7 @@ class _MoodTrackingScreenState extends ConsumerState<MoodTrackingScreen> {
       case 'angry':
         return Colors.red.shade600;
       default:
-        return Colors.grey.shade400;
+        return Colors.grey.shade500;
     }
   }
 }

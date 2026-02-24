@@ -1,10 +1,13 @@
-import 'package:image_cropper/image_cropper.dart';
 import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+
+import '../../widgets/app_page_scaffold.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -33,89 +36,94 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _loadUserData();
   }
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _usernameController.dispose();
+    _bioController.dispose();
+    _moodController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadUserData() async {
     final uid = _auth.currentUser!.uid;
-
-    // find user document by uid
     final userDoc = await _firestore
-        .collection("users")
-        .where("uid", isEqualTo: uid)
+        .collection('users')
+        .where('uid', isEqualTo: uid)
         .limit(1)
         .get();
 
-    if (userDoc.docs.isNotEmpty) {
-      final data = userDoc.docs.first.data();
-      setState(() {
-        _currentUsername = data["username"];
-        _nameController.text = data["fullName"] ?? "";
-        _usernameController.text = data["username"] ?? "";
-        _bioController.text = data["bio"] ?? "";
-        _moodController.text = data["mood"] ?? "";
-        _profileImageUrl = data["profileImage"];
-      });
-    }
+    if (userDoc.docs.isEmpty) return;
+    final data = userDoc.docs.first.data();
+    if (!mounted) return;
+    setState(() {
+      _currentUsername = data['username']?.toString();
+      _nameController.text = data['fullName']?.toString() ?? '';
+      _usernameController.text = data['username']?.toString() ?? '';
+      _bioController.text = data['bio']?.toString() ?? '';
+      _moodController.text = data['mood']?.toString() ?? '';
+      _profileImageUrl = data['profileImage']?.toString();
+    });
   }
 
   Future<void> _pickImage() async {
-    final pickedFile = await ImagePicker()
-        .pickImage(source: ImageSource.gallery, imageQuality: 70);
+    final pickedFile = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+    );
+    if (pickedFile == null) return;
 
-    if (pickedFile != null) {
-      final croppedFile = await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        uiSettings: [
-          AndroidUiSettings(
-              toolbarTitle: 'Cropper',
-              toolbarColor: Colors.deepOrange,
-              toolbarWidgetColor: Colors.white,
-              initAspectRatio: CropAspectRatioPreset.original,
-              lockAspectRatio: false,
-              aspectRatioPresets: [
-                CropAspectRatioPreset.square,
-                CropAspectRatioPreset.ratio3x2,
-                CropAspectRatioPreset.original,
-                CropAspectRatioPreset.ratio4x3,
-                CropAspectRatioPreset.ratio16x9
-              ]),
-          IOSUiSettings(
-            title: 'Cropper',
-            aspectRatioPresets: [
-              CropAspectRatioPreset.square,
-              CropAspectRatioPreset.ratio3x2,
-              CropAspectRatioPreset.original,
-              CropAspectRatioPreset.ratio4x3,
-              CropAspectRatioPreset.ratio16x9
-            ],
-          ),
-        ],
-      );
+    final croppedFile = await ImageCropper().cropImage(
+      sourcePath: pickedFile.path,
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: 'Crop Image',
+          initAspectRatio: CropAspectRatioPreset.square,
+          lockAspectRatio: false,
+          aspectRatioPresets: const [
+            CropAspectRatioPreset.square,
+            CropAspectRatioPreset.ratio3x2,
+            CropAspectRatioPreset.original,
+            CropAspectRatioPreset.ratio4x3,
+            CropAspectRatioPreset.ratio16x9,
+          ],
+        ),
+        IOSUiSettings(
+          title: 'Crop Image',
+          aspectRatioPresets: const [
+            CropAspectRatioPreset.square,
+            CropAspectRatioPreset.ratio3x2,
+            CropAspectRatioPreset.original,
+            CropAspectRatioPreset.ratio4x3,
+            CropAspectRatioPreset.ratio16x9,
+          ],
+        ),
+      ],
+    );
 
-      if (croppedFile != null) {
-        setState(() {
-          _pickedImage = File(croppedFile.path);
-        });
-      }
-    }
+    if (croppedFile == null || !mounted) return;
+    setState(() => _pickedImage = File(croppedFile.path));
   }
 
   Future<void> _saveProfile() async {
-    if (_nameController.text.trim().length < 3) {
+    final fullName = _nameController.text.trim();
+    final username = _usernameController.text.trim();
+    if (fullName.length < 3) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Full name must be at least 3 characters")),
+        const SnackBar(
+            content: Text('Full name must be at least 3 characters')),
       );
       return;
     }
-
-    if (_nameController.text.trim().length > 50) {
+    if (fullName.length > 50) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Full name cannot exceed 50 characters")),
+        const SnackBar(content: Text('Full name cannot exceed 50 characters')),
       );
       return;
     }
-
-    if (_usernameController.text.trim().isEmpty) {
+    if (username.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Username cannot be empty")),
+        const SnackBar(content: Text('Username cannot be empty')),
       );
       return;
     }
@@ -124,7 +132,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Save Changes'),
-        content: const Text('Are you sure you want to save the changes?'),
+        content: const Text('Do you want to save your profile updates?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -137,98 +145,77 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ],
       ),
     );
-
     if (confirm != true) return;
 
     setState(() => _loading = true);
-
     try {
       String? imageUrl = _profileImageUrl;
 
-      // If a new profile image is picked, upload to Firebase Storage
       if (_pickedImage != null) {
         final ref = FirebaseStorage.instance
             .ref()
-            .child("profile_images")
-            .child("${_auth.currentUser!.uid}.jpg");
-
+            .child('profile_images')
+            .child('${_auth.currentUser!.uid}.jpg');
         await ref.putFile(_pickedImage!);
         imageUrl = await ref.getDownloadURL();
       }
 
+      final uid = _auth.currentUser!.uid;
+      final userQuery = await _firestore
+          .collection('users')
+          .where('uid', isEqualTo: uid)
+          .limit(1)
+          .get();
+      if (userQuery.docs.isEmpty) return;
+
+      final docRef = userQuery.docs.first.reference;
+      final oldData = userQuery.docs.first.data();
       final newUsername = _usernameController.text.trim();
 
-      // If username is changed
       if (newUsername != _currentUsername) {
         final usernameCheck = await _firestore
-            .collection("users")
-            .doc(newUsername)
+            .collection('users')
+            .where('username', isEqualTo: newUsername)
+            .limit(1)
             .get();
-
-        if (usernameCheck.exists) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Username already taken")),
-            );
-          }
+        if (usernameCheck.docs.isNotEmpty) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Username already taken')),
+          );
           setState(() => _loading = false);
           return;
         }
 
-        final uid = _auth.currentUser!.uid;
-        final userQuery = await _firestore
-            .collection("users")
-            .where("uid", isEqualTo: uid)
-            .limit(1)
-            .get();
-
-        if (userQuery.docs.isNotEmpty) {
-          final oldDocRef = userQuery.docs.first.reference;
-          final oldData = userQuery.docs.first.data();
-
-          final newData = {
-            ...oldData,
-            "fullName": _nameController.text.trim(),
-            "username": newUsername,
-            "bio": _bioController.text.trim(),
-            "mood": _moodController.text.trim(),
-            "profileImage": imageUrl,
-          };
-
-          await _firestore.collection("users").doc(newUsername).set(newData);
-          await oldDocRef.delete();
-        }
+        final newData = {
+          ...oldData,
+          'fullName': fullName,
+          'username': newUsername,
+          'bio': _bioController.text.trim(),
+          'mood': _moodController.text.trim(),
+          'profileImage': imageUrl,
+        };
+        await _firestore.collection('users').doc(newUsername).set(newData);
+        await docRef.delete();
       } else {
-        // update user data in Firestore
-        final uid = _auth.currentUser!.uid;
-        final userQuery = await _firestore
-            .collection("users")
-            .where("uid", isEqualTo: uid)
-            .limit(1)
-            .get();
-
-        if (userQuery.docs.isNotEmpty) {
-          final docRef = userQuery.docs.first.reference;
-          await docRef.update({
-            "fullName": _nameController.text.trim(),
-            "bio": _bioController.text.trim(),
-            "mood": _moodController.text.trim(),
-            "profileImage": imageUrl,
-          });
-        }
+        await docRef.update({
+          'fullName': fullName,
+          'bio': _bioController.text.trim(),
+          'mood': _moodController.text.trim(),
+          'profileImage': imageUrl,
+        });
       }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Profile updated successfully")),
+        const SnackBar(content: Text('Profile updated successfully')),
       );
       Navigator.pop(context);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e")),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -236,84 +223,86 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Edit Profile"),
-      ),
-      body: _loading
+    return AppPageScaffold(
+      appBar: AppBar(title: const Text('Edit Profile')),
+      child: _loading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
+          : ListView(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  GestureDetector(
-                    onTap: _pickImage,
-                    child: CircleAvatar(
-                      radius: 50,
-                      backgroundImage: _pickedImage != null
-                          ? FileImage(_pickedImage!)
-                          : (_profileImageUrl != null
-                              ? NetworkImage(_profileImageUrl!) as ImageProvider
-                              : const AssetImage("assets/icons/icon.png")),
-                      child: Align(
-                        alignment: Alignment.bottomRight,
+              children: [
+                AppSectionCard(
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        onTap: _pickImage,
                         child: CircleAvatar(
-                          backgroundColor: Colors.white,
-                          radius: 18,
-                          child: const Icon(Icons.edit, size: 20),
+                          radius: 56,
+                          backgroundImage: _pickedImage != null
+                              ? FileImage(_pickedImage!)
+                              : (_profileImageUrl != null &&
+                                      _profileImageUrl!.isNotEmpty
+                                  ? NetworkImage(_profileImageUrl!)
+                                  : const AssetImage('assets/icons/icon.png')
+                                      as ImageProvider),
+                          child: Align(
+                            alignment: Alignment.bottomRight,
+                            child: CircleAvatar(
+                              radius: 18,
+                              child: Icon(
+                                Icons.camera_alt_rounded,
+                                color: Theme.of(context).colorScheme.primary,
+                                size: 18,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: "Full Name",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _usernameController,
-                    decoration: const InputDecoration(
-                      labelText: "Username",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _bioController,
-                    decoration: const InputDecoration(
-                      labelText: "About",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _moodController,
-                    decoration: const InputDecoration(
-                      labelText: "Mood",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                  ElevatedButton(
-                    onPressed: _saveProfile,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14, horizontal: 40),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                      const SizedBox(height: 18),
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name',
+                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        ),
                       ),
-                    ),
-                    child: const Text(
-                      "Save",
-                      style: TextStyle(fontSize: 18),
-                    ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _usernameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Username',
+                          prefixIcon: Icon(Icons.alternate_email_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _bioController,
+                        minLines: 2,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'About',
+                          prefixIcon: Icon(Icons.info_outline_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _moodController,
+                        decoration: const InputDecoration(
+                          labelText: 'Mood',
+                          prefixIcon: Icon(Icons.emoji_emotions_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _saveProfile,
+                          child: const Text('Save Changes'),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
     );
   }

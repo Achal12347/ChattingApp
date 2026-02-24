@@ -1,17 +1,19 @@
 import 'dart:async';
 import 'dart:io';
 
-import './block_reason_display.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../providers/auth_provider.dart';
-import '../providers/message_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/message_provider.dart';
+import 'block_reason_display.dart';
 
 class ChatInput extends ConsumerStatefulWidget {
   final String chatId;
@@ -45,75 +47,98 @@ class ChatInput extends ConsumerStatefulWidget {
 
 class _ChatInputState extends ConsumerState<ChatInput> {
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  final ImagePicker _imagePicker = ImagePicker();
+
   bool _isSending = false;
   bool _showEmojiPicker = false;
   bool _isTyping = false;
   Timer? _typingTimer;
 
-  final ImagePicker _imagePicker = ImagePicker();
+  bool get _hasText => _controller.text.trim().isNotEmpty;
 
-  void _sendMessage(
-      {String? content, String? mediaUrl, String? mediaType}) async {
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(() {
+      if (_focusNode.hasFocus && _showEmojiPicker) {
+        setState(() => _showEmojiPicker = false);
+      }
+    });
+  }
+
+  Future<void> _sendMessage({
+    String? content,
+    String? mediaUrl,
+    String? mediaType,
+  }) async {
     final messageContent = content ?? _controller.text.trim();
-    if (messageContent.isEmpty && (mediaUrl == null || mediaType == null))
+    if (messageContent.isEmpty && (mediaUrl == null || mediaType == null)) {
       return;
+    }
 
     setState(() {
       _isSending = true;
-      _showEmojiPicker = false; // Hide emoji picker when sending
+      _showEmojiPicker = false;
     });
 
     final currentUser = ref.read(authStateProvider).value;
     if (currentUser == null) {
-      setState(() {
-        _isSending = false;
-      });
+      if (mounted) setState(() => _isSending = false);
       return;
     }
 
     try {
       if (widget.isGroupChat) {
-        ref.read(sendGroupMessageProvider({
-          'groupId': widget.groupId!,
-          'senderId': currentUser!.uid,
-          'content': messageContent,
-        }));
+        ref.read(
+          sendGroupMessageProvider({
+            'groupId': widget.groupId!,
+            'senderId': currentUser.uid,
+            'content': messageContent,
+          }),
+        );
       } else if (mediaUrl != null && mediaType != null) {
-        ref.read(sendMediaMessageProvider({
-          'chatId': widget.chatId,
-          'senderId': currentUser!.uid,
-          'receiverId': widget.receiverId,
-          'mediaUrl': mediaUrl,
-          'mediaType': mediaType,
-          'caption': messageContent,
-        }));
+        ref.read(
+          sendMediaMessageProvider({
+            'chatId': widget.chatId,
+            'senderId': currentUser.uid,
+            'receiverId': widget.receiverId,
+            'mediaUrl': mediaUrl,
+            'mediaType': mediaType,
+            'caption': messageContent,
+          }),
+        );
       } else {
-        ref.read(sendMessageProvider({
-          'chatId': widget.chatId,
-          'senderId': currentUser!.uid,
-          'receiverId': widget.receiverId,
-          'content': messageContent,
-        }));
+        ref.read(
+          sendMessageProvider({
+            'chatId': widget.chatId,
+            'senderId': currentUser.uid,
+            'receiverId': widget.receiverId,
+            'content': messageContent,
+          }),
+        );
       }
+
       _controller.clear();
+      _updateTypingStatus(false);
+      if (mounted) setState(() {});
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send message: $e')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send message: $e')));
     } finally {
-      setState(() {
-        _isSending = false;
-      });
+      if (mounted) setState(() => _isSending = false);
     }
   }
 
   void _onTextChanged(String text) {
-    if (widget.isGroupChat) return; // Disable typing for group chats
-    final isCurrentlyTyping = text.isNotEmpty;
+    if (mounted) setState(() {});
+
+    if (widget.isGroupChat) return;
+    final isCurrentlyTyping = text.trim().isNotEmpty;
     if (_isTyping != isCurrentlyTyping) {
-      setState(() {
-        _isTyping = isCurrentlyTyping;
-      });
+      _isTyping = isCurrentlyTyping;
       _updateTypingStatus(isCurrentlyTyping);
     }
   }
@@ -139,50 +164,52 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     setState(() {
       _showEmojiPicker = !_showEmojiPicker;
     });
+    if (_showEmojiPicker) {
+      _focusNode.unfocus();
+    } else {
+      _focusNode.requestFocus();
+    }
   }
 
   void _onEmojiSelected(Category? category, Emoji emoji) {
     final text = _controller.text;
     final selection = _controller.selection;
-    final newText =
-        text.replaceRange(selection.start, selection.end, emoji.emoji);
+    final baseOffset = selection.start < 0 ? text.length : selection.start;
+    final extentOffset = selection.end < 0 ? text.length : selection.end;
+    final newText = text.replaceRange(baseOffset, extentOffset, emoji.emoji);
+
     _controller.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(
-        offset: selection.start + emoji.emoji.length,
+        offset: baseOffset + emoji.emoji.length,
       ),
     );
+
+    _onTextChanged(_controller.text);
   }
 
   Future<void> _pickFile() async {
     if (widget.isBlockedBy || widget.isBlocking || widget.isGroupChat) return;
 
     final result = await FilePicker.platform.pickFiles();
-    if (result != null && result.files.isNotEmpty) {
-      final file = result.files.first;
-      final filePath = file.path;
-      if (filePath == null) return;
+    if (result == null || result.files.isEmpty) return;
 
-      setState(() {
-        _isSending = true;
-      });
+    final filePath = result.files.first.path;
+    if (filePath == null) return;
 
-      try {
-        final mediaUrl = await ref
-            .read(firebaseStorageServiceProvider)
-            .uploadFile(File(filePath));
-        _sendMessage(mediaUrl: mediaUrl, mediaType: 'file');
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send file: $e')),
-        );
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isSending = false;
-          });
-        }
-      }
+    setState(() => _isSending = true);
+    try {
+      final mediaUrl = await ref
+          .read(firebaseStorageServiceProvider)
+          .uploadFile(File(filePath));
+      await _sendMessage(mediaUrl: mediaUrl, mediaType: 'file');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send file: $e')));
+    } finally {
+      if (mounted) setState(() => _isSending = false);
     }
   }
 
@@ -191,33 +218,31 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
     final permissionStatus = await Permission.photos.request();
     if (!permissionStatus.isGranted) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permission denied to access gallery')),
+        const SnackBar(content: Text('Gallery permission denied')),
       );
       return;
     }
 
-    final pickedFile =
-        await _imagePicker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+    );
     if (pickedFile == null) return;
 
-    setState(() {
-      _isSending = true;
-    });
-
+    setState(() => _isSending = true);
     try {
       final mediaUrl = await ref
           .read(firebaseStorageServiceProvider)
           .uploadFile(File(pickedFile.path));
-      _sendMessage(mediaUrl: mediaUrl, mediaType: 'image');
+      await _sendMessage(mediaUrl: mediaUrl, mediaType: 'image');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send image: $e')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send image: $e')));
     } finally {
-      setState(() {
-        _isSending = false;
-      });
+      if (mounted) setState(() => _isSending = false);
     }
   }
 
@@ -226,43 +251,87 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
     final permissionStatus = await Permission.camera.request();
     if (!permissionStatus.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permission denied to access camera')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Camera permission denied')));
       return;
     }
 
     final pickedFile = await _imagePicker.pickImage(source: ImageSource.camera);
     if (pickedFile == null) return;
 
-    setState(() {
-      _isSending = true;
-    });
-
+    setState(() => _isSending = true);
     try {
       final mediaUrl = await ref
           .read(firebaseStorageServiceProvider)
           .uploadFile(File(pickedFile.path));
-      _sendMessage(mediaUrl: mediaUrl, mediaType: 'image');
+      await _sendMessage(mediaUrl: mediaUrl, mediaType: 'image');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send photo: $e')),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send photo: $e')));
     } finally {
-      setState(() {
-        _isSending = false;
-      });
+      if (mounted) setState(() => _isSending = false);
     }
+  }
+
+  Future<void> _showAttachmentSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded),
+                title: const Text('Photo from gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded),
+                title: const Text('Take photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _takePhoto();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.insert_drive_file_rounded),
+                title: const Text('Send file'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickFile();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
     _typingTimer?.cancel();
+    _focusNode.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sendingDisabled =
+        !_hasText || widget.isBlockedBy || widget.isBlocking || _isSending;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -278,115 +347,113 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           ),
         if (_showEmojiPicker)
           SizedBox(
-            height: 250,
+            height: 260,
             child: EmojiPicker(
               onEmojiSelected: _onEmojiSelected,
-              config: Config(),
+              config: Config(
+                emojiViewConfig: EmojiViewConfig(
+                  emojiSizeMax: 28 *
+                      (defaultTargetPlatform == TargetPlatform.iOS ? 1.2 : 1.0),
+                ),
+              ),
             ),
           ),
         SafeArea(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Colors.grey.shade200)),
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(
-                    _showEmojiPicker ? Icons.keyboard : Icons.emoji_emotions,
-                    color: _showEmojiPicker ? Colors.blue : Colors.grey,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: _toggleEmojiPicker,
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: theme.brightness == Brightness.dark
+                      ? Colors.white10
+                      : Colors.black12,
                 ),
-                if (!widget.isGroupChat)
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.attach_file),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onSelected: (value) {
-                      switch (value) {
-                        case 'file':
-                          _pickFile();
-                          break;
-                        case 'camera':
-                          _takePhoto();
-                          break;
-                        case 'gallery':
-                          _pickImage();
-                          break;
-                      }
-                    },
-                    itemBuilder: (BuildContext context) => [
-                      const PopupMenuItem<String>(
-                        value: 'file',
-                        child: Text('Pick File'),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Emoji',
+                      icon: Icon(
+                        _showEmojiPicker
+                            ? Icons.keyboard_rounded
+                            : Icons.emoji_emotions_outlined,
+                        color: _showEmojiPicker
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurfaceVariant,
                       ),
-                      const PopupMenuItem<String>(
-                        value: 'camera',
-                        child: Text('Take Photo'),
+                      onPressed: _toggleEmojiPicker,
+                    ),
+                    if (!widget.isGroupChat)
+                      IconButton(
+                        tooltip: 'Attach',
+                        icon: Icon(
+                          Icons.add_circle_outline_rounded,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        onPressed: widget.isBlockedBy || widget.isBlocking
+                            ? null
+                            : _showAttachmentSheet,
                       ),
-                      const PopupMenuItem<String>(
-                        value: 'gallery',
-                        child: Text('Pick Image'),
-                      ),
-                    ],
-                  ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _sendMessage(),
-                    onChanged: _onTextChanged,
-                    maxLines: null,
-                    enabled: !widget.isBlockedBy && !widget.isBlocking,
-                    decoration: InputDecoration(
-                      hintText: widget.isBlockedBy || widget.isBlocking
-                          ? 'Messaging disabled'
-                          : widget.isGroupChat
-                              ? 'Type a group message...'
-                              : 'Type a message...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey.shade100,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 16,
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendMessage(),
+                        onChanged: _onTextChanged,
+                        maxLines: null,
+                        enabled: !widget.isBlockedBy && !widget.isBlocking,
+                        decoration: InputDecoration(
+                          hintText: widget.isBlockedBy || widget.isBlocking
+                              ? 'Messaging disabled'
+                              : widget.isGroupChat
+                                  ? 'Message group'
+                                  : 'Type a message',
+                          border: InputBorder.none,
+                          isCollapsed: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 12,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _isSending
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Container(
-                        decoration: BoxDecoration(
-                          color: (_controller.text.trim().isEmpty ||
-                                  widget.isBlockedBy ||
-                                  widget.isBlocking)
-                              ? Colors.grey.shade300
-                              : Colors.blue,
-                          shape: BoxShape.circle,
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.send, color: Colors.white),
-                          onPressed: (_controller.text.trim().isEmpty ||
-                                  widget.isBlockedBy ||
-                                  widget.isBlocking)
-                              ? null
-                              : () => _sendMessage(),
-                        ),
+                    const SizedBox(width: 6),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      decoration: BoxDecoration(
+                        color: sendingDisabled
+                            ? theme.colorScheme.outlineVariant
+                            : theme.colorScheme.primary,
+                        shape: BoxShape.circle,
                       ),
-              ],
+                      child: IconButton(
+                        icon: _isSending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.send_rounded,
+                                color: Colors.white,
+                              ),
+                        onPressed:
+                            sendingDisabled ? null : () => _sendMessage(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

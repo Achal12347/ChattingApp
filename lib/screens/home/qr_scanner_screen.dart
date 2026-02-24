@@ -92,6 +92,8 @@ class _QRScannerScreenState extends ConsumerState<QRScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scan QR Code'),
@@ -114,20 +116,31 @@ class _QRScannerScreenState extends ConsumerState<QRScannerScreen> {
           ),
           if (_isProcessing)
             Container(
-              color: Colors.black54,
+              color: Colors.black.withValues(alpha: 0.56),
               child: const Center(
                 child: CircularProgressIndicator(),
               ),
             ),
           Align(
             alignment: Alignment.bottomCenter,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.black54,
-              child: const Text(
-                'Point your camera at a QR code to connect',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-                textAlign: TextAlign.center,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.surface.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Point your camera at a QR code to connect',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ),
             ),
           ),

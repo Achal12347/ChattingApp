@@ -23,10 +23,7 @@ class GroupService {
         lastMessageAt: DateTime.now(),
       );
 
-      await _firestore
-          .collection('groups')
-          .doc(groupId)
-          .set(group.toMap());
+      await _firestore.collection('groups').doc(groupId).set(group.toMap());
 
       return group;
     } catch (e) {

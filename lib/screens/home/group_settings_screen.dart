@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/group_service.dart';
 import '../../models/group_model.dart';
+import '../../widgets/app_page_scaffold.dart';
 
 class GroupSettingsScreen extends ConsumerStatefulWidget {
   final String groupId;
@@ -107,31 +108,6 @@ class _GroupSettingsScreenState extends ConsumerState<GroupSettingsScreen> {
         setState(() {
           _isGeneratingInvite = false;
         });
-      }
-    }
-  }
-
-  Future<void> _addMember(String memberId) async {
-    if (_group == null) return;
-
-    final currentUser = ref.read(authStateProvider).value;
-    if (currentUser == null) return;
-
-    try {
-      final groupService = ref.read(groupServiceProvider);
-      await groupService.addMemberToGroup(
-          widget.groupId, currentUser.uid, memberId);
-      await _loadGroupAndMembers(); // Refresh group data
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Member added successfully!')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add member: $e')),
-        );
       }
     }
   }
@@ -361,19 +337,19 @@ class _GroupSettingsScreenState extends ConsumerState<GroupSettingsScreen> {
     final currentUser = ref.watch(authStateProvider).value;
 
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return const AppPageScaffold(
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_group == null) {
-      return Scaffold(
+      return AppPageScaffold(
         appBar: AppBar(title: const Text('Group Settings')),
-        body: const Center(child: Text('Group not found')),
+        child: const Center(child: Text('Group not found')),
       );
     }
 
-    return Scaffold(
+    return AppPageScaffold(
       appBar: AppBar(
         title: Text(widget.isProfileMode ? 'Group Profile' : 'Group Settings'),
         automaticallyImplyLeading:
@@ -387,7 +363,7 @@ class _GroupSettingsScreenState extends ConsumerState<GroupSettingsScreen> {
             ),
         ],
       ),
-      body: ListView(
+      child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           // Group Info

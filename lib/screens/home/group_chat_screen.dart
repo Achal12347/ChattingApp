@@ -1,14 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../app_routes.dart';
 import '../../providers/chat_provider.dart';
 import '../../providers/message_provider.dart';
-import '../../providers/auth_provider.dart';
-import '../../widgets/message_bubble.dart';
 import '../../widgets/chat_input.dart';
-import '../../app_routes.dart';
+import '../../widgets/message_bubble.dart';
 
-// GroupChatScreen takes groupId, currentUserId
 class GroupChatScreen extends ConsumerStatefulWidget {
   final String groupId;
   final String currentUserId;
@@ -24,170 +23,254 @@ class GroupChatScreen extends ConsumerStatefulWidget {
 }
 
 class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
+  final ScrollController _scrollController = ScrollController();
   String _groupName = 'Loading...';
   Map<String, Map<String, dynamic>> _users = {};
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Start syncing messages
-    final chatService = ref.read(chatServiceProvider);
-    chatService.syncMessages(widget.groupId, widget.currentUserId);
-    // Fetch group name
-    _fetchGroupName();
-    // Auto-mark all messages as read when entering group screen
-    _markAllAsRead();
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeGroupChat();
+    });
   }
 
-  Future<void> _fetchGroupName() async {
+  Future<void> _initializeGroupChat() async {
+    if (widget.groupId.isEmpty || widget.currentUserId.isEmpty) return;
+    final chatService = ref.read(chatServiceProvider);
+    chatService.syncMessages(widget.groupId, widget.currentUserId);
+    await _fetchGroupData();
+    await _markAllAsRead();
+  }
+
+  Future<void> _fetchGroupData() async {
     try {
       final doc = await FirebaseFirestore.instance
           .collection('groups')
           .doc(widget.groupId)
           .get();
-      if (doc.exists && mounted) {
-        final groupName = doc.data()?['name'] ?? 'Unknown Group';
-        final participants =
-            List<String>.from(doc.data()?['participants'] ?? []);
+      if (!doc.exists) return;
+
+      final data = doc.data();
+      if (data == null) return;
+
+      final groupName = data['name']?.toString() ?? 'Unknown Group';
+      final participants = List<String>.from(data['participants'] ?? []);
+
+      if (mounted) {
         setState(() {
           _groupName = groupName;
         });
-        // Fetch users
-        if (participants.isNotEmpty) {
-          final usersSnapshot = await FirebaseFirestore.instance
-              .collection('users')
-              .where(FieldPath.documentId, whereIn: participants)
-              .get();
-          final users = {
-            for (var doc in usersSnapshot.docs) doc.id: doc.data(),
-          };
-          if (mounted) {
-            setState(() {
-              _users = users;
-            });
-          }
-        }
-      } else if (mounted) {
-        setState(() {
-          _groupName = 'Unknown Group';
-        });
       }
-    } catch (e) {
+
+      if (participants.isEmpty) return;
+
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where(FieldPath.documentId, whereIn: participants)
+          .get();
+      final users = {for (final doc in usersSnapshot.docs) doc.id: doc.data()};
+
       if (mounted) {
         setState(() {
-          _groupName = 'Unknown Group';
+          _users = users;
         });
       }
+    } catch (_) {
+      if (mounted) setState(() => _groupName = 'Unknown Group');
     }
   }
 
-  void _markAllAsRead() async {
-    if (widget.groupId.isNotEmpty && widget.currentUserId.isNotEmpty) {
-      await ref
-          .read(chatServiceProvider)
-          .markAllMessagesAsRead(widget.groupId, widget.currentUserId);
-      // Remove snackbar notification for auto-mark on screen open
-    }
+  Future<void> _markAllAsRead() async {
+    if (widget.groupId.isEmpty || widget.currentUserId.isEmpty) return;
+    await ref
+        .read(chatServiceProvider)
+        .markAllMessagesAsRead(widget.groupId, widget.currentUserId);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final messagesAsync = ref.watch(groupMessagesProvider(widget.groupId));
-
     if (widget.groupId.isEmpty || widget.currentUserId.isEmpty) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text("Error"),
-        ),
-        body: const Center(child: Text("Invalid group parameters")),
+        appBar: AppBar(title: const Text('Error')),
+        body: const Center(child: Text('Invalid group parameters')),
       );
     }
 
+    final messagesAsync = ref.watch(groupMessagesProvider(widget.groupId));
+
     return Scaffold(
       appBar: AppBar(
-        title: GestureDetector(
+        titleSpacing: 0,
+        title: InkWell(
           onTap: () {
-            Navigator.pushNamed(context, AppRoutes.groupProfile,
-                arguments: {'groupId': widget.groupId});
+            Navigator.pushNamed(
+              context,
+              AppRoutes.groupProfile,
+              arguments: {'groupId': widget.groupId},
+            );
           },
-          child: Text(_groupName),
+          borderRadius: BorderRadius.circular(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_groupName, maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                '${_users.length} members',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
+          ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.done_all),
-            onPressed: _markAllAsRead,
+            icon: const Icon(Icons.done_all_rounded),
             tooltip: 'Mark all as read',
+            onPressed: _markAllAsRead,
           ),
           PopupMenuButton<String>(
             onSelected: (value) {
-              switch (value) {
-                case 'settings':
-                  Navigator.pushNamed(context, AppRoutes.groupSettings,
-                      arguments: {'groupId': widget.groupId});
-                  break;
-                case 'profile':
-                  Navigator.pushNamed(context, AppRoutes.groupProfile,
-                      arguments: {'groupId': widget.groupId});
-                  break;
+              if (value == 'settings') {
+                Navigator.pushNamed(
+                  context,
+                  AppRoutes.groupSettings,
+                  arguments: {'groupId': widget.groupId},
+                );
+              } else if (value == 'profile') {
+                Navigator.pushNamed(
+                  context,
+                  AppRoutes.groupProfile,
+                  arguments: {'groupId': widget.groupId},
+                );
               }
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'settings',
-                child: Text('Group Settings'),
-              ),
-              const PopupMenuItem(
-                value: 'profile',
-                child: Text('Group Profile'),
-              ),
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'settings', child: Text('Group Settings')),
+              PopupMenuItem(value: 'profile', child: Text('Group Profile')),
             ],
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: messagesAsync.when(
-              data: (messages) {
-                if (messages.isEmpty) {
-                  return const Center(child: Text("Say hello 👋"));
-                }
-
-                // Mark unread messages as read
-                for (final msg in messages) {
-                  if (!msg.isRead && msg.senderId != widget.currentUserId) {
-                    ref
-                        .read(chatServiceProvider)
-                        .markMessageAsRead(widget.groupId, msg.id);
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Theme.of(context).colorScheme.surface,
+              Theme.of(context).scaffoldBackgroundColor,
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: messagesAsync.when(
+                data: (messages) {
+                  if (messages.isEmpty) {
+                    return const _EmptyGroupChatView();
                   }
-                }
 
-                return ListView.builder(
-                  itemCount: messages.length,
-                  itemBuilder: (_, index) {
-                    final msg = messages[index];
-                    final user = _users[msg.senderId];
-                    return MessageBubble(
-                      message: msg,
-                      currentUserId: widget.currentUserId,
-                      isGroupChat: true,
-                      senderName: user?['username'] ?? 'Unknown User',
-                      senderAvatarUrl: user?['profileImage'],
+                  for (final msg in messages) {
+                    if (!msg.isRead && msg.senderId != widget.currentUserId) {
+                      ref
+                          .read(chatServiceProvider)
+                          .markMessageAsRead(widget.groupId, msg.id);
+                    }
+                  }
+
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!_scrollController.hasClients) return;
+                    _scrollController.animateTo(
+                      _scrollController.position.maxScrollExtent,
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
                     );
-                  },
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stack) => Center(child: Text('Error: $error')),
+                  });
+
+                  return ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.only(top: 10, bottom: 12),
+                    itemCount: messages.length,
+                    itemBuilder: (_, index) {
+                      final msg = messages[index];
+                      final sender = _users[msg.senderId];
+                      return MessageBubble(
+                        message: msg,
+                        currentUserId: widget.currentUserId,
+                        isGroupChat: true,
+                        senderName:
+                            sender?['username']?.toString() ?? 'Unknown User',
+                        senderAvatarUrl: sender?['profileImage']?.toString(),
+                      );
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stack) => Center(child: Text('Error: $error')),
+              ),
             ),
-          ),
-          ChatInput(
-            chatId: widget.groupId,
-            receiverId: '',
-            isGroupChat: true,
-            groupId: widget.groupId,
-          ),
-        ],
+            ChatInput(
+              chatId: widget.groupId,
+              receiverId: '',
+              isGroupChat: true,
+              groupId: widget.groupId,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyGroupChatView extends StatelessWidget {
+  const _EmptyGroupChatView();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.secondaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.groups_rounded,
+                size: 38,
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'No group messages yet',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Start the group conversation.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

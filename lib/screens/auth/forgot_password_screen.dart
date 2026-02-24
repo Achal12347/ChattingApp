@@ -1,5 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import '../../widgets/auth_shell.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -22,107 +24,77 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         email: _emailController.text.trim(),
       );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Password reset email sent!')),
-        );
-        Navigator.pop(context); // Go back to login screen
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password reset email sent.')),
+      );
+      Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.message ?? '❌ Reset failed')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Reset failed')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[100],
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: 400,
-          ), // ✅ Windows OOBE style card
-          child: Card(
-            elevation: 6,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+    return AuthShell(
+      icon: Icons.lock_reset_rounded,
+      title: 'Forgot Password',
+      subtitle: 'Enter your registered email to receive a reset link',
+      child: Form(
+        key: _formKey,
+        child: Column(
+          children: [
+            TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email Address',
+                prefixIcon: Icon(Icons.email_outlined),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Email is required';
+                }
+                if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
+                  return 'Enter a valid email';
+                }
+                return null;
+              },
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Icon(Icons.lock_reset, size: 60, color: Colors.blue),
-                    const SizedBox(height: 16),
-                    const Text(
-                      "Forgot Password",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      "Enter your registered email and we'll send you a reset link.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 15, color: Colors.black54),
-                    ),
-                    const SizedBox(height: 24),
-                    TextFormField(
-                      controller: _emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email Address',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.email_outlined),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Email is required';
-                        }
-                        if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
-                          return 'Enter a valid email';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 24),
-                    _loading
-                        ? const Center(child: CircularProgressIndicator())
-                        : ElevatedButton(
-                            onPressed: _resetPassword,
-                            style: ElevatedButton.styleFrom(
-                              minimumSize: const Size(double.infinity, 50),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text(
-                              'Send Reset Link',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                          ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("⬅ Back to Login"),
-                    ),
-                  ],
-                ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _loading ? null : _resetPassword,
+                child: _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Send Reset Link'),
               ),
             ),
-          ),
+          ],
         ),
       ),
+      footer: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Back to Login'),
+        ),
+      ],
     );
   }
 }

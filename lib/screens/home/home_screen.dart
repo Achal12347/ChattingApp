@@ -1,17 +1,17 @@
-import '../../widgets/mood_selector.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import '../../app_routes.dart';
-import '../../services/chat_service.dart';
 
+import '../../app_routes.dart';
 import '../../database/app_database.dart';
-import '../../providers/chat_provider.dart';
-import '../../providers/auth_provider.dart';
 import '../../models/group_model.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/chat_provider.dart';
+import '../../services/chat_service.dart';
 import '../../services/group_service.dart';
+import '../../widgets/mood_selector.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -21,66 +21,32 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final Map<String, String> _usernames = {};
-  final Map<String, String> _profilePhotoUrls = {};
-
   String _formatLastSeen(DateTime? lastSeen) {
-    if (lastSeen == null) return '';
+    if (lastSeen == null) return 'Offline';
     final now = DateTime.now();
     final difference = now.difference(lastSeen);
 
+    if (difference.inMinutes < 1) return 'Last seen just now';
+    if (difference.inHours < 1) return 'Last seen ${difference.inMinutes}m ago';
     if (difference.inDays == 0) {
       return 'Last seen today at ${DateFormat('h:mm a').format(lastSeen)}';
-    } else if (difference.inDays == 1) {
+    }
+    if (difference.inDays == 1) {
       return 'Last seen yesterday at ${DateFormat('h:mm a').format(lastSeen)}';
-    } else if (difference.inDays < 7) {
-      return 'Last seen ${difference.inDays} days ago';
-    } else {
-      return 'Last seen ${DateFormat('MMM d').format(lastSeen)}';
     }
+    if (difference.inDays < 7) return 'Last seen ${difference.inDays}d ago';
+    return 'Last seen ${DateFormat('MMM d').format(lastSeen)}';
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _fetchInitialData();
-  }
-
-  Future<void> _fetchInitialData() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final chatsSnapshot = await FirebaseFirestore.instance
-        .collection('chats')
-        .where('participants', arrayContains: user.uid)
-        .get();
-
-    final uids = <String>{};
-    for (final doc in chatsSnapshot.docs) {
-      final participants = List<String>.from(doc.data()['participants'] ?? []);
-      for (final uid in participants) {
-        if (uid != user.uid) {
-          uids.add(uid);
-        }
-      }
+  String _formatTileTime(DateTime? timestamp) {
+    if (timestamp == null) return '';
+    final now = DateTime.now();
+    if (now.year == timestamp.year &&
+        now.month == timestamp.month &&
+        now.day == timestamp.day) {
+      return DateFormat('h:mm a').format(timestamp);
     }
-
-    if (uids.isNotEmpty) {
-      final usersSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .where('uid', whereIn: uids.toList())
-          .get();
-
-      for (final doc in usersSnapshot.docs) {
-        final data = doc.data();
-        _usernames[data['uid']] = data['username'] ?? 'Unknown User';
-        _profilePhotoUrls[data['uid']] = data['profileImage'] ?? '';
-      }
-    }
-
-    if (mounted) {
-      setState(() {});
-    }
+    return DateFormat('MMM d').format(timestamp);
   }
 
   void _openMenu(String choice) {
@@ -97,11 +63,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 'Mark All as Read':
         _markAllAsRead();
         break;
-
       case 'Unblock Requests':
-        Navigator.pushNamed(context, '/unblockRequests');
+        Navigator.pushNamed(context, AppRoutes.unblockRequests);
         break;
-
       case 'Logout':
         FirebaseAuth.instance.signOut();
         Navigator.pushReplacementNamed(context, AppRoutes.login);
@@ -109,7 +73,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  void _markAllAsRead() async {
+  Future<void> _markAllAsRead() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -125,17 +89,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .markAllMessagesAsRead(chatDoc.id, user.uid);
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('All messages marked as read')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All messages marked as read')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error marking messages as read: $e')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error marking messages as read: $e')),
+      );
     }
   }
 
@@ -144,43 +106,120 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (user == null) return;
 
     final chatService = ref.read(chatServiceProvider);
-
     for (final chat in chats) {
-      final chatId = chat['id'] ?? '';
+      final chatId = chat['id']?.toString() ?? '';
       if (chatId.isNotEmpty) {
         chatService.syncMessages(chatId, user.uid);
       }
     }
   }
 
+  Future<void> _deleteChat(String chatId, String username) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Chat'),
+        content: Text(
+          'Delete the chat with $username? This removes chat history for everyone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final chatRef = FirebaseFirestore.instance.collection('chats').doc(chatId);
+    final messagesRef = chatRef.collection('messages');
+    final messagesSnapshot = await messagesRef.get();
+    for (final doc in messagesSnapshot.docs) {
+      await doc.reference.delete();
+    }
+    await chatRef.delete();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Chat deleted')));
+  }
+
+  Future<void> _leaveGroup(GroupModel group, String currentUserId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Leave Group'),
+        content: Text('Leave "${group.name}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final groupService = ref.read(groupServiceProvider);
+    await groupService.leaveGroup(group.id, currentUserId);
+    ref.invalidate(groupsProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leadingWidth: 72,
         leading: StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance
               .collection('users')
-              .doc(FirebaseAuth.instance.currentUser!.uid)
+              .doc(FirebaseAuth.instance.currentUser?.uid)
               .snapshots(),
           builder: (context, snapshot) {
-            String currentMood = '🙂'; // default
-            if (snapshot.hasData && snapshot.data!.exists) {
-              final data = snapshot.data!.data() as Map<String, dynamic>;
-              currentMood = data['mood'] ?? '🙂';
+            String currentMood = '🙂';
+            if (snapshot.hasData && snapshot.data?.exists == true) {
+              final data = snapshot.data!.data() as Map<String, dynamic>?;
+              currentMood = data?['mood']?.toString() ?? '🙂';
             }
             return IconButton(
-              icon: Text(currentMood, style: const TextStyle(fontSize: 24)),
               tooltip: 'Mood',
               onPressed: () {
-                showModalBottomSheet(
+                showModalBottomSheet<void>(
                   context: context,
+                  showDragHandle: true,
                   builder: (context) => const MoodSelector(),
                 );
               },
+              icon: CircleAvatar(
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                child: Text(currentMood, style: const TextStyle(fontSize: 18)),
+              ),
             );
           },
         ),
-        title: const Text("Chatly"),
+        titleSpacing: 0,
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Chats'),
+            Text(
+              'Your recent conversations',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
@@ -190,7 +229,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.qr_code),
+            icon: const Icon(Icons.qr_code_2_rounded),
             tooltip: 'My QR Code',
             onPressed: () {
               Navigator.of(context).pushNamed(AppRoutes.qrCode);
@@ -199,26 +238,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           PopupMenuButton<String>(
             tooltip: 'Menu',
             onSelected: _openMenu,
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                  value: 'Create Group', child: Text("Create Group")),
-              const PopupMenuItem(
-                  value: 'Edit Profile', child: Text("Edit Profile")),
-              const PopupMenuItem(value: 'Settings', child: Text("Settings")),
-              const PopupMenuItem(
-                  value: 'Mark All as Read', child: Text("Mark All as Read")),
-              const PopupMenuItem(value: 'Logout', child: Text("Logout")),
-              const PopupMenuDivider(),
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'Create Group', child: Text('Create Group')),
+              PopupMenuItem(value: 'Edit Profile', child: Text('Edit Profile')),
+              PopupMenuItem(value: 'Settings', child: Text('Settings')),
+              PopupMenuItem(
+                value: 'Mark All as Read',
+                child: Text('Mark All as Read'),
+              ),
               PopupMenuItem(
                 value: 'Unblock Requests',
-                child: Row(
-                  children: const [
-                    Icon(Icons.lock_open, size: 18),
-                    SizedBox(width: 8),
-                    Text('Unblock Requests'),
-                  ],
-                ),
+                child: Text('Unblock Requests'),
               ),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'Logout', child: Text('Logout')),
             ],
           ),
         ],
@@ -226,26 +259,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       body: Consumer(
         builder: (context, ref, _) {
           final user = ref.watch(authStateProvider).value;
-          if (user == null) return const Center(child: Text("Please log in"));
+          if (user == null) {
+            return const Center(child: Text('Please log in'));
+          }
 
           final chatsAsync = ref.watch(chatsProvider);
-          final groupsAsync = ref.watch(groupsProvider);
+          final groups = ref.watch(groupsProvider);
 
           return chatsAsync.when(
             data: (chats) {
-              final groups = groupsAsync;
               if (chats.isEmpty && groups.isEmpty) {
-                return const Center(
-                  child: Text(
-                    "👋 Welcome to Chatly!\nTap the search icon to find friends or create a group.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 18),
-                  ),
+                return _EmptyChatState(
+                  onSearchPressed: () {
+                    showSearch(
+                      context: context,
+                      delegate: UserSearchDelegate(),
+                    );
+                  },
                 );
               }
 
-              // Combine chats and groups
-              final combined = [
+              final combined = <Map<String, dynamic>>[
                 ...chats.map((c) => {'type': 'chat', 'data': c}),
                 ...groups.map((g) => {'type': 'group', 'data': g}),
               ];
@@ -253,276 +287,401 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               combined.sort((a, b) {
                 DateTime? aTime;
                 DateTime? bTime;
+
                 if (a['type'] == 'chat') {
-                  final chatData = a['data'] as Map<String, dynamic>;
-                  aTime = (chatData['lastMessageAt'] as Timestamp?)?.toDate();
+                  aTime = ((a['data'] as Map<String, dynamic>)['lastMessageAt']
+                          as Timestamp?)
+                      ?.toDate();
                 } else {
-                  final group = a['data'] as GroupModel;
-                  aTime = group.lastMessageAt;
+                  aTime = (a['data'] as GroupModel).lastMessageAt;
                 }
+
                 if (b['type'] == 'chat') {
-                  final chatData = b['data'] as Map<String, dynamic>;
-                  bTime = (chatData['lastMessageAt'] as Timestamp?)?.toDate();
+                  bTime = ((b['data'] as Map<String, dynamic>)['lastMessageAt']
+                          as Timestamp?)
+                      ?.toDate();
                 } else {
-                  final group = b['data'] as GroupModel;
-                  bTime = group.lastMessageAt;
+                  bTime = (b['data'] as GroupModel).lastMessageAt;
                 }
-                return bTime?.compareTo(aTime ?? DateTime.now()) ?? 0;
+
+                return (bTime ?? DateTime.fromMillisecondsSinceEpoch(0))
+                    .compareTo(aTime ?? DateTime.fromMillisecondsSinceEpoch(0));
               });
 
-              _startSyncForAllChats(chats); // Still sync chats
+              _startSyncForAllChats(chats);
 
-              return ListView.builder(
-                itemCount: combined.length,
-                itemBuilder: (context, index) {
-                  final item = combined[index];
-                  if (item['type'] == 'chat') {
-                    final chat = item['data'] as Map<String, dynamic>;
-                    final participants =
-                        List<String>.from(chat['participants'] ?? []);
-                    final otherUserId = participants.firstWhere(
+              return Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Theme.of(context).colorScheme.surface,
+                      Theme.of(context).scaffoldBackgroundColor,
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  itemCount: combined.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = combined[index];
+                    if (item['type'] == 'chat') {
+                      final chat = item['data'] as Map<String, dynamic>;
+                      final participants = List<String>.from(
+                        chat['participants'] ?? [],
+                      );
+                      final otherUserId = participants.firstWhere(
                         (id) => id != user.uid && id.isNotEmpty,
-                        orElse: () => '');
+                        orElse: () => '',
+                      );
 
-                    if (otherUserId.isEmpty) {
-                      return const SizedBox(); // Skip invalid chats
-                    }
+                      if (otherUserId.isEmpty) return const SizedBox.shrink();
 
-                    final lastMessage = chat['lastMessage'] ?? '';
-                    final lastMessageAt = chat['lastMessageAt'] != null
-                        ? (chat['lastMessageAt'] as Timestamp).toDate()
-                        : null;
+                      final unreadCount = (chat['unreadCount']
+                              as Map<String, dynamic>?)?[user.uid] ??
+                          0;
+                      final lastMessage = chat['lastMessage']?.toString() ?? '';
+                      final lastMessageAt =
+                          (chat['lastMessageAt'] as Timestamp?)?.toDate();
 
-                    final unreadCount = (chat['unreadCount']
-                            as Map<String, dynamic>?)?[user.uid] ??
-                        0;
-                    print(
-                        'HomeScreen: Chat ID: ${chat['id']}, Unread Count: $unreadCount');
+                      return StreamBuilder<DocumentSnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(otherUserId)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const _ConversationTilePlaceholder();
+                          }
 
-                    return StreamBuilder<DocumentSnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(otherUserId)
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const ListTile(
-                            leading: CircleAvatar(
-                              child: CircularProgressIndicator(),
-                            ),
-                            title: Text('Loading...'),
-                          );
-                        }
+                          final userData =
+                              snapshot.data!.data() as Map<String, dynamic>?;
+                          final username = userData?['username']?.toString() ??
+                              'Unknown User';
+                          final profilePhotoUrl =
+                              userData?['profileImage']?.toString() ?? '';
+                          final mood = userData?['mood']?.toString() ?? '';
+                          final userStatus =
+                              userData?['status']?.toString() ?? 'offline';
+                          final lastSeen =
+                              (userData?['lastSeen'] as Timestamp?)?.toDate();
 
-                        final otherUsername = (snapshot.data?.data()
-                                as Map<String, dynamic>?)?['username'] ??
-                            'Unknown User';
-                        final profilePhotoUrl = (snapshot.data?.data()
-                                as Map<String, dynamic>?)?['profileImage'] ??
-                            '';
-                        final mood = (snapshot.data?.data()
-                                as Map<String, dynamic>?)?['mood'] ??
-                            '';
-                        final userStatus = (snapshot.data?.data()
-                                as Map<String, dynamic>?)?['status'] ??
-                            'offline';
-                        final lastSeenTimestamp = (snapshot.data?.data()
-                                as Map<String, dynamic>?)?['lastSeen']
-                            as Timestamp?;
-                        final lastSeen = lastSeenTimestamp?.toDate();
+                          final subtitle = lastMessage.trim().isNotEmpty
+                              ? lastMessage
+                              : (userStatus == 'online'
+                                  ? 'Online'
+                                  : _formatLastSeen(lastSeen));
 
-                        return ListTile(
-                          leading: Stack(
-                            children: [
-                              CircleAvatar(
-                                backgroundImage: profilePhotoUrl.isNotEmpty
-                                    ? NetworkImage(profilePhotoUrl)
-                                    : null,
-                                child: profilePhotoUrl.isEmpty
-                                    ? const Icon(Icons.person)
-                                    : null,
-                              ),
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    color: userStatus == 'online'
-                                        ? Colors.green
-                                        : Colors.red,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: Colors.white, width: 2),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          trailing: unreadCount > 0
-                              ? Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    unreadCount.toString(),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                )
-                              : null,
-                          title: Row(
-                            children: [
-                              Text(
-                                otherUsername,
-                                style: TextStyle(
-                                  fontWeight: unreadCount > 0
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                              if (mood.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 8.0),
-                                  child: Text(mood,
-                                      style: const TextStyle(fontSize: 14)),
-                                ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            userStatus == 'online'
-                                ? 'Online'
-                                : _formatLastSeen(lastSeen),
-                            style: const TextStyle(
-                              color: Colors.grey,
-                            ),
-                          ),
-                          onTap: () async {
-                            await Navigator.pushNamed(context, AppRoutes.chat,
+                          return _ConversationTile(
+                            title: username,
+                            subtitle: subtitle,
+                            timeText: _formatTileTime(lastMessageAt),
+                            avatarUrl: profilePhotoUrl,
+                            badgeText:
+                                unreadCount > 0 ? unreadCount.toString() : null,
+                            moodText: mood.isNotEmpty ? mood : null,
+                            isOnline: userStatus == 'online',
+                            onTap: () async {
+                              await Navigator.pushNamed(
+                                context,
+                                AppRoutes.chat,
                                 arguments: {
                                   'chatId': chat['id'] ?? '',
                                   'receiverId': otherUserId,
                                   'currentUserId': user.uid,
-                                });
-                            ref.invalidate(chatsProvider);
-                            print(
-                                'HomeScreen: chatsProvider invalidated after returning from chat.');
-                          },
-                          onLongPress: () async {
-                            final confirm = await showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Delete Chat'),
-                                content: Text(
-                                    'Are you sure you want to delete chat with $otherUsername? This will delete all chat history.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(context).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(context).pop(true),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
+                                },
+                              );
+                              ref.invalidate(chatsProvider);
+                            },
+                            onLongPress: () => _deleteChat(
+                              chat['id']?.toString() ?? '',
+                              username,
+                            ),
+                          );
+                        },
+                      );
+                    }
 
-                            if (confirm == true) {
-                              final chatId = chat['id'] ?? '';
-                              final chatRef = FirebaseFirestore.instance
-                                  .collection('chats')
-                                  .doc(chatId);
-                              final messagesRef =
-                                  chatRef.collection('messages');
-
-                              final messagesSnapshot = await messagesRef.get();
-                              for (final doc in messagesSnapshot.docs) {
-                                await doc.reference.delete();
-                              }
-
-                              await chatRef.delete();
-
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content:
-                                          Text('Chat deleted successfully')),
-                                );
-                              }
-                            }
-                          },
-                        );
-                      },
-                    );
-                  } else {
-                    // Group
                     final group = item['data'] as GroupModel;
-
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundImage: group.avatarUrl != null
-                            ? NetworkImage(group.avatarUrl!)
-                            : null,
-                        child: group.avatarUrl == null
-                            ? const Icon(Icons.group)
-                            : null,
-                      ),
-                      title: Text(group.name),
-                      subtitle: const Text('Group'),
+                    return _ConversationTile(
+                      title: group.name,
+                      subtitle: group.lastMessage.isNotEmpty
+                          ? group.lastMessage
+                          : '${group.participants.length} members',
+                      timeText: _formatTileTime(group.lastMessageAt),
+                      avatarUrl: group.avatarUrl ?? '',
+                      badgeText: 'Group',
+                      isGroup: true,
                       onTap: () {
-                        Navigator.pushNamed(context, AppRoutes.groupChat,
-                            arguments: {
-                              'groupId': group.id,
-                              'currentUserId': user.uid,
-                            });
-                      },
-                      onLongPress: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Leave Group'),
-                            content: Text(
-                                'Are you sure you want to leave ${group.name}?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.of(context).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.of(context).pop(true),
-                                child: const Text('Leave'),
-                              ),
-                            ],
-                          ),
+                        Navigator.pushNamed(
+                          context,
+                          AppRoutes.groupChat,
+                          arguments: {
+                            'groupId': group.id,
+                            'currentUserId': user.uid,
+                          },
                         );
-
-                        if (confirm == true) {
-                          final groupService = ref.read(groupServiceProvider);
-                          await groupService.leaveGroup(group.id, user.uid);
-                          ref.invalidate(groupsProvider);
-                        }
                       },
+                      onLongPress: () => _leaveGroup(group, user.uid),
                     );
-                  }
-                },
+                  },
+                ),
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, stack) => Center(child: Text('Error: $error')),
           );
         },
+      ),
+    );
+  }
+}
+
+class _ConversationTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String timeText;
+  final String avatarUrl;
+  final String? badgeText;
+  final String? moodText;
+  final bool isOnline;
+  final bool isGroup;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  const _ConversationTile({
+    required this.title,
+    required this.subtitle,
+    required this.timeText,
+    required this.avatarUrl,
+    required this.onTap,
+    this.badgeText,
+    this.moodText,
+    this.isOnline = false,
+    this.isGroup = false,
+    this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: theme.colorScheme.primaryContainer,
+                    backgroundImage:
+                        avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+                    child: avatarUrl.isEmpty
+                        ? Icon(
+                            isGroup
+                                ? Icons.groups_rounded
+                                : Icons.person_rounded,
+                            color: theme.colorScheme.onPrimaryContainer,
+                          )
+                        : null,
+                  ),
+                  if (!isGroup)
+                    Positioned(
+                      right: -1,
+                      bottom: -1,
+                      child: Container(
+                        width: 13,
+                        height: 13,
+                        decoration: BoxDecoration(
+                          color: isOnline
+                              ? Colors.green.shade500
+                              : Colors.grey.shade400,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: theme.colorScheme.surface,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (moodText != null) ...[
+                          const SizedBox(width: 6),
+                          Text(moodText!, style: const TextStyle(fontSize: 13)),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    timeText,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  if (badgeText != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isGroup
+                            ? theme.colorScheme.secondaryContainer
+                            : theme.colorScheme.primary,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        badgeText!,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: isGroup
+                              ? theme.colorScheme.onSecondaryContainer
+                              : theme.colorScheme.onPrimary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationTilePlaceholder extends StatelessWidget {
+  const _ConversationTilePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final shade = Theme.of(context).brightness == Brightness.dark
+        ? Colors.white12
+        : Colors.black12;
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 26, backgroundColor: shade),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(height: 14, width: 120, color: shade),
+                const SizedBox(height: 8),
+                Container(height: 12, width: 170, color: shade),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyChatState extends StatelessWidget {
+  final VoidCallback onSearchPressed;
+
+  const _EmptyChatState({required this.onSearchPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.forum_rounded,
+                size: 42,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No conversations yet',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Start a new chat from search or create a group.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: onSearchPressed,
+              icon: const Icon(Icons.person_search_rounded),
+              label: const Text('Find people'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -535,7 +694,7 @@ class UserSearchDelegate extends SearchDelegate {
   List<Widget>? buildActions(BuildContext context) {
     return [
       if (query.isNotEmpty)
-        IconButton(icon: const Icon(Icons.clear), onPressed: () => query = '')
+        IconButton(icon: const Icon(Icons.clear), onPressed: () => query = ''),
     ];
   }
 
@@ -548,21 +707,22 @@ class UserSearchDelegate extends SearchDelegate {
   }
 
   @override
-  Widget buildResults(BuildContext context) => _buildUserList();
-  @override
-  Widget buildSuggestions(BuildContext context) => _buildUserList();
+  Widget buildResults(BuildContext context) => _buildUserList(context);
 
-  Widget _buildUserList() {
+  @override
+  Widget buildSuggestions(BuildContext context) => _buildUserList(context);
+
+  Widget _buildUserList(BuildContext context) {
     if (query.trim().isEmpty) {
-      return const Center(child: Text("Search for users by username or email"));
+      return const Center(child: Text('Search users by username'));
     }
 
     return FutureBuilder<QuerySnapshot>(
       future: _firestore
           .collection('users')
           .where('username', isGreaterThanOrEqualTo: query)
-          .where('username', isLessThanOrEqualTo: "$query\uf8ff")
-          .limit(10)
+          .where('username', isLessThanOrEqualTo: '$query\uf8ff')
+          .limit(20)
           .get(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
@@ -570,29 +730,42 @@ class UserSearchDelegate extends SearchDelegate {
         }
 
         final users = snapshot.data!.docs;
-        if (users.isEmpty) return const Center(child: Text("No users found"));
+        if (users.isEmpty) return const Center(child: Text('No users found'));
 
-        return ListView.builder(
+        return ListView.separated(
+          padding: const EdgeInsets.all(12),
           itemCount: users.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
-            final doc = users[index];
-            final userData = doc.data() as Map<String, dynamic>;
+            final userData = users[index].data() as Map<String, dynamic>;
+            final username = userData['username']?.toString() ?? 'Unknown';
+            final email = userData['email']?.toString() ?? '';
+            final profileUrl = userData['profileImage']?.toString() ?? '';
+
             return ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: Text(userData['username'] ?? 'Unknown'),
-              subtitle: Text(userData['email'] ?? ''),
+              tileColor: Theme.of(context).colorScheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              leading: CircleAvatar(
+                backgroundImage:
+                    profileUrl.isNotEmpty ? NetworkImage(profileUrl) : null,
+                child: profileUrl.isEmpty
+                    ? const Icon(Icons.person_rounded)
+                    : null,
+              ),
+              title: Text(username),
+              subtitle: Text(email),
               onTap: () async {
                 final currentUser = FirebaseAuth.instance.currentUser;
                 if (currentUser == null) return;
                 final currentUserId = currentUser.uid;
-                final receiverId = userData['uid'] as String;
+                final receiverId = userData['uid'] as String? ?? '';
                 if (receiverId.isEmpty) return;
 
-                // Sorted chatId
-                final chatIdList = [currentUserId, receiverId]..sort();
-                final chatIdStr = chatIdList.join('_');
+                final chatIdParts = [currentUserId, receiverId]..sort();
+                final generatedChatId = chatIdParts.join('_');
 
-                // Check if chat exists
                 final existingChatsQuery = await _firestore
                     .collection('chats')
                     .where('participants', arrayContains: currentUserId)
@@ -600,50 +773,47 @@ class UserSearchDelegate extends SearchDelegate {
 
                 String? existingChatId;
                 for (final doc in existingChatsQuery.docs) {
-                  final participants =
-                      List<String>.from(doc.data()['participants'] ?? []);
-                  if (participants.contains(currentUserId) &&
+                  final participants = List<String>.from(
+                    doc.data()['participants'] ?? [],
+                  );
+                  final isDirectChat = participants.contains(currentUserId) &&
                       participants.contains(receiverId) &&
-                      participants.length == 2) {
+                      participants.length == 2;
+                  if (isDirectChat) {
                     existingChatId = doc.id;
                     break;
                   }
                 }
 
-                // Ensure chat exists
                 final participantUsernames = <String>[];
                 for (final uid in [currentUserId, receiverId]) {
-                  if (uid.isNotEmpty) {
-                    try {
-                      final userDoc =
-                          await _firestore.collection('users').doc(uid).get();
-                      participantUsernames
-                          .add(userDoc.data()?['username'] ?? 'Unknown User');
-                    } catch (_) {
-                      participantUsernames.add('Unknown User');
-                    }
-                  } else {
-                    participantUsernames.add('Unknown User');
-                    print(
-                        'HomeScreen: Skipped fetching userDoc due to empty uid');
-                  }
+                  final userDoc =
+                      await _firestore.collection('users').doc(uid).get();
+                  participantUsernames.add(
+                    userDoc.data()?['username']?.toString() ?? 'Unknown',
+                  );
                 }
 
                 final chatService = ChatService(AppDatabase.instance);
-                final finalChatId = existingChatId ?? chatIdStr;
+                final finalChatId = existingChatId ?? generatedChatId;
                 await chatService.ensureChatExists(
-                  finalChatId,
-                  [currentUserId, receiverId],
-                  participantUsernames: participantUsernames,
-                );
+                    finalChatId,
+                    [
+                      currentUserId,
+                      receiverId,
+                    ],
+                    participantUsernames: participantUsernames);
 
                 close(context, userData);
-
-                Navigator.pushNamed(context, AppRoutes.chat, arguments: {
-                  'chatId': finalChatId,
-                  'receiverId': receiverId,
-                  'currentUserId': currentUserId,
-                });
+                Navigator.pushNamed(
+                  context,
+                  AppRoutes.chat,
+                  arguments: {
+                    'chatId': finalChatId,
+                    'receiverId': receiverId,
+                    'currentUserId': currentUserId,
+                  },
+                );
               },
             );
           },

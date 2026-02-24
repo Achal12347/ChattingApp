@@ -1,14 +1,15 @@
-import '../../providers/unblock_request_provider.dart';
-import '../../providers/chat_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app_routes.dart';
+import '../../providers/chat_provider.dart';
+import '../../providers/unblock_request_provider.dart';
+import '../../services/relationship_service.dart';
+import '../../widgets/app_page_scaffold.dart';
 import '../../widgets/mood_indicator.dart';
 import '../../widgets/relationship_tag_dialog.dart';
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../app_routes.dart';
-import '../../services/relationship_service.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   final String? userId;
@@ -22,9 +23,9 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final RelationshipService _relationshipService = RelationshipService();
   String? _relationTag;
-  bool _isMuted = false; // TODO: Fetch from chat settings
-  bool _isPinned = false; // TODO: Fetch from chat settings
-  bool _isArchived = false; // TODO: Fetch from chat settings
+  bool _isMuted = false;
+  bool _isPinned = false;
+  bool _isArchived = false;
 
   @override
   void initState() {
@@ -37,23 +38,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _fetchRelationTag() async {
-    if (widget.userId != null) {
-      _relationTag = await _relationshipService.getRelationship(widget.userId!);
-      if (mounted) setState(() {});
-    }
+    if (widget.userId == null) return;
+    _relationTag = await _relationshipService.getRelationship(widget.userId!);
+    if (mounted) setState(() {});
   }
 
-  String _getLastSeenText(bool isOnline, DateTime? lastSeen) {
-    if (isOnline) return "Online";
-    if (lastSeen != null) {
-      return "last seen ${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}";
-    }
-    return "last seen recently";
+  String _statusText(bool isOnline, DateTime? lastSeen) {
+    if (isOnline) return 'Online';
+    if (lastSeen == null) return 'Last seen recently';
+    return 'Last seen ${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}';
   }
 
   void _showBlockUserDialog() {
     final reasonController = TextEditingController();
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Block User'),
@@ -69,13 +67,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           TextButton(
             onPressed: () async {
               final reason = reasonController.text.trim();
-              if (reason.isNotEmpty) {
-                await _relationshipService.blockUser(widget.userId!, reason);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("User blocked")),
-                );
-              }
+              if (reason.isEmpty || widget.userId == null) return;
+              await _relationshipService.blockUser(widget.userId!, reason);
+              if (!mounted) return;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('User blocked')),
+              );
             },
             child: const Text('Block'),
           ),
@@ -93,41 +91,28 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final unblockRequests = ref.watch(unblockRequestProvider).unblockRequests;
 
     if (profileUserId == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text("Profile")),
-        body: const Center(child: Text("User not found")),
+      return AppPageScaffold(
+        appBar: AppBar(title: const Text('Profile')),
+        child: const Center(child: Text('User not found')),
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.white,
+    return AppPageScaffold(
       appBar: AppBar(
-        title: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(profileUserId)
-              .snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.hasData && snapshot.data!.exists) {
-              final userData = snapshot.data!.data() as Map<String, dynamic>;
-              return Text(userData['fullName'] ?? 'Profile');
-            }
-            return const Text('Profile');
-          },
-        ),
-        backgroundColor: Colors.teal,
+        title: const Text('Profile'),
         actions: isOwnProfile
             ? [
                 IconButton(
-                  icon: const Icon(Icons.edit),
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: 'Edit profile',
                   onPressed: () {
                     Navigator.pushNamed(context, AppRoutes.editProfile);
                   },
                 ),
               ]
-            : [],
+            : null,
       ),
-      body: StreamBuilder<DocumentSnapshot>(
+      child: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance
             .collection('users')
             .doc(profileUserId)
@@ -137,7 +122,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: Text("User not found"));
+            return const Center(child: Text('User not found'));
           }
 
           final userData = snapshot.data!.data() as Map<String, dynamic>;
@@ -146,285 +131,249 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           final profilePhotoPrivacy =
               privacySettings['profilePhoto'] ?? 'everyone';
           final aboutPrivacy = privacySettings['about'] ?? 'everyone';
-
           final canShowProfilePhoto = profilePhotoPrivacy == 'everyone' ||
-              (profilePhotoPrivacy == 'myContacts'); // TODO: check contacts
-          final canShowAbout = aboutPrivacy == 'everyone' ||
-              (aboutPrivacy == 'myContacts'); // TODO: check contacts
+              profilePhotoPrivacy == 'myContacts';
+          final canShowAbout =
+              aboutPrivacy == 'everyone' || aboutPrivacy == 'myContacts';
 
           final profilePicUrl = canShowProfilePhoto &&
-                  userData['profileImage'] != null &&
-                  userData['profileImage'].isNotEmpty
-              ? userData['profileImage']
+                  (userData['profileImage']?.toString().isNotEmpty ?? false)
+              ? userData['profileImage'].toString()
               : '';
-          final fullName = userData['fullName'] ?? 'Not set';
-          final username = userData['username'] ?? 'Not set';
-          final bio = canShowAbout &&
-                  userData['bio'] != null &&
-                  userData['bio'].isNotEmpty
-              ? userData['bio']
-              : "Hey there! I am using Chatly.";
-          final mood = userData['mood'] ?? '';
+          final fullName = userData['fullName']?.toString() ?? 'Not set';
+          final username = userData['username']?.toString() ?? 'Not set';
+          final bio =
+              canShowAbout && (userData['bio']?.toString().isNotEmpty ?? false)
+                  ? userData['bio'].toString()
+                  : 'Hey there! I am using Chatly.';
+          final mood = userData['mood']?.toString() ?? '';
           final isOnline = userData['status'] == 'online';
           final lastSeen = (userData['lastSeen'] as Timestamp?)?.toDate();
 
-          return SingleChildScrollView(
-            child: Column(
-              children: [
-                // Profile Picture
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  alignment: Alignment.center,
-                  child: Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 60,
-                        backgroundImage: profilePicUrl.isNotEmpty
-                            ? NetworkImage(profilePicUrl)
-                            : null,
-                        child: profilePicUrl.isEmpty
-                            ? Text(
-                                username.substring(0, 1).toUpperCase(),
-                                style: const TextStyle(fontSize: 40),
-                              )
-                            : null,
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: MoodIndicator(
-                          userId: profileUserId,
-                          size: 30,
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              AppSectionCard(
+                child: Column(
+                  children: [
+                    Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 54,
+                          backgroundImage: profilePicUrl.isNotEmpty
+                              ? NetworkImage(profilePicUrl)
+                              : null,
+                          child: profilePicUrl.isEmpty
+                              ? Text(
+                                  username.substring(0, 1).toUpperCase(),
+                                  style: const TextStyle(fontSize: 36),
+                                )
+                              : null,
                         ),
+                        Positioned(
+                          bottom: 2,
+                          right: 2,
+                          child: MoodIndicator(userId: profileUserId, size: 30),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      fullName,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _statusText(isOnline, lastSeen),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                    if (mood.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Chip(
+                        avatar: const Icon(Icons.emoji_emotions_outlined),
+                        label: Text('Mood: $mood'),
                       ),
                     ],
-                  ),
+                  ],
                 ),
-
-                // Name & Status
-                Text(fullName,
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 5),
-                Text(
-                  _getLastSeenText(isOnline, lastSeen),
-                  style: const TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 15),
-
-                const Divider(),
-
-                // Mood Status
-                ListTile(
-                  leading:
-                      const Icon(Icons.emoji_emotions, color: Colors.orange),
-                  title: const Text("Mood"),
-                  subtitle: Text(mood.isNotEmpty ? mood : "No mood set"),
-                ),
-
-                // Relation Tag
-                ListTile(
-                  leading: const Icon(Icons.people, color: Colors.blue),
-                  title: const Text("Relation"),
-                  subtitle: Text(_relationTag?.isNotEmpty == true
-                      ? _relationTag!
-                      : "Not tagged"),
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => RelationshipTagDialog(
-                        initialTag: _relationTag,
-                        onTagSelected: (tag) async {
-                          final currentUser = FirebaseAuth.instance.currentUser;
-                          if (currentUser != null && widget.userId != null) {
-                            await _relationshipService.setRelationshipTag(
-                              currentUser.uid,
-                              widget.userId!,
-                              tag,
-                            );
-                            _fetchRelationTag();
-                          }
-                        },
+              ),
+              const SizedBox(height: 12),
+              AppSectionCard(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.people_alt_outlined),
+                      title: const Text('Relation'),
+                      subtitle: Text(
+                        _relationTag?.isNotEmpty == true
+                            ? _relationTag!
+                            : 'Not tagged',
                       ),
-                    );
-                  },
+                      onTap: () {
+                        showDialog<void>(
+                          context: context,
+                          builder: (context) => RelationshipTagDialog(
+                            initialTag: _relationTag,
+                            onTagSelected: (tag) async {
+                              final user = FirebaseAuth.instance.currentUser;
+                              if (user == null || widget.userId == null) return;
+                              await _relationshipService.setRelationshipTag(
+                                user.uid,
+                                widget.userId!,
+                                tag,
+                              );
+                              _fetchRelationTag();
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline_rounded),
+                      title: const Text('About'),
+                      subtitle: Text(bio),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.alternate_email_rounded),
+                      title: const Text('Username'),
+                      subtitle: Text(username),
+                    ),
+                  ],
                 ),
-
-                // About / Bio
-                ListTile(
-                  leading: const Icon(Icons.info_outline, color: Colors.teal),
-                  title: const Text("About"),
-                  subtitle: Text(bio),
-                ),
-
-                // Username
-                ListTile(
-                  leading:
-                      const Icon(Icons.person_outline, color: Colors.purple),
-                  title: const Text("Username"),
-                  subtitle: Text(username),
-                ),
-
-                const Divider(),
-
-                // Media / Links / Docs (placeholder)
-                ListTile(
-                  leading: const Icon(Icons.photo_library, color: Colors.green),
-                  title: const Text("Media, Links & Docs"),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    // TODO: Navigate to media gallery screen
-                  },
-                ),
-
-                const Divider(),
-
-                // Unblock Requests
-                if (isOwnProfile && unblockRequests.isNotEmpty)
-                  Column(
+              ),
+              if (isOwnProfile && unblockRequests.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                AppSectionCard(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Padding(
-                        padding: EdgeInsets.all(16.0),
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         child: Text(
                           'Unblock Requests',
                           style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: unblockRequests.length,
-                        itemBuilder: (context, index) {
-                          final request = unblockRequests[index];
+                      ...unblockRequests.map((request) {
+                        return ListTile(
+                          title: Text('Request from ${request.fromUserId}'),
+                          subtitle: Text(request.message ?? 'No message'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.check_circle_outline,
+                                  color: Colors.green,
+                                ),
+                                onPressed: () {
+                                  ref
+                                      .read(unblockRequestProvider.notifier)
+                                      .acceptUnblockRequest(request.id);
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.cancel_outlined,
+                                  color: Colors.red,
+                                ),
+                                onPressed: () {
+                                  ref
+                                      .read(unblockRequestProvider.notifier)
+                                      .rejectUnblockRequest(request.id);
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ],
+              if (!isOwnProfile) ...[
+                const SizedBox(height: 12),
+                AppSectionCard(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    children: [
+                      SwitchListTile.adaptive(
+                        title: const Text('Mute Notifications'),
+                        secondary: const Icon(Icons.volume_off_outlined),
+                        value: _isMuted,
+                        onChanged: (value) => setState(() => _isMuted = value),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.push_pin_outlined),
+                        title: Text(_isPinned ? 'Unpin Chat' : 'Pin Chat'),
+                        onTap: () => setState(() => _isPinned = !_isPinned),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.archive_outlined),
+                        title: Text(
+                            _isArchived ? 'Unarchive Chat' : 'Archive Chat'),
+                        onTap: () => setState(() => _isArchived = !_isArchived),
+                      ),
+                      ListTile(
+                        leading:
+                            const Icon(Icons.block_rounded, color: Colors.red),
+                        title: const Text('Block Contact'),
+                        onTap: _showBlockUserDialog,
+                      ),
+                      Consumer(
+                        builder: (context, ref, _) {
+                          final blockedUsers = ref.watch(blockedUsersProvider);
+                          final isBlocked =
+                              blockedUsers.contains(widget.userId);
+                          if (!isBlocked || widget.userId == null) {
+                            return const SizedBox.shrink();
+                          }
                           return ListTile(
-                            title: Text('Request from ${request.fromUserId}'),
-                            subtitle: Text(request.message ?? 'No message'),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.check,
-                                      color: Colors.green),
-                                  onPressed: () {
-                                    ref
-                                        .read(unblockRequestProvider.notifier)
-                                        .acceptUnblockRequest(request.id);
-                                  },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.close,
-                                      color: Colors.red),
-                                  onPressed: () {
-                                    ref
-                                        .read(unblockRequestProvider.notifier)
-                                        .rejectUnblockRequest(request.id);
-                                  },
-                                ),
-                              ],
+                            leading: const Icon(
+                              Icons.lock_open_rounded,
+                              color: Colors.green,
                             ),
+                            title: const Text('Unblock Contact'),
+                            onTap: () async {
+                              await ref
+                                  .read(blockedUsersProvider.notifier)
+                                  .unblockUser(widget.userId!);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('User unblocked')),
+                              );
+                            },
                           );
                         },
                       ),
-                      const Divider(),
                     ],
                   ),
-
-                // Actions
-                if (!isOwnProfile) ...[
-                  ListTile(
-                    leading: const Icon(Icons.volume_off, color: Colors.grey),
-                    title: const Text("Mute Notifications"),
-                    trailing: Switch(
-                      value: _isMuted,
-                      onChanged: (val) {
-                        setState(() {
-                          _isMuted = val;
-                        });
-                        // TODO: Implement mute in chat service
-                      },
-                    ),
-                  ),
-                  ListTile(
-                    leading:
-                        const Icon(Icons.push_pin, color: Colors.deepPurple),
-                    title: const Text("Pin Chat"),
-                    onTap: () {
-                      setState(() {
-                        _isPinned = !_isPinned;
-                      });
-                      // TODO: Implement pin chat in chat service
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.archive, color: Colors.blueGrey),
-                    title: const Text("Archive Chat"),
-                    onTap: () {
-                      setState(() {
-                        _isArchived = !_isArchived;
-                      });
-                      // TODO: Implement archive in chat service
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.block, color: Colors.red),
-                    title: const Text("Block Contact"),
-                    onTap: _showBlockUserDialog,
-                  ),
-                  // Add direct unblock option if user is blocked
-                  Consumer(
-                    builder: (context, ref, _) {
-                      final blockedUsers = ref.watch(blockedUsersProvider);
-                      final isBlocked = blockedUsers.contains(widget.userId);
-                      if (isBlocked) {
-                        return ListTile(
-                          leading:
-                              const Icon(Icons.lock_open, color: Colors.green),
-                          title: const Text("Unblock Contact"),
-                          onTap: () async {
-                            await ref
-                                .read(blockedUsersProvider.notifier)
-                                .unblockUser(widget.userId!);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("User unblocked")),
-                            );
-                          },
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.report, color: Colors.redAccent),
-                    title: const Text("Report"),
-                    onTap: () {
-                      // TODO: Implement report functionality
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text("Report feature coming soon")),
-                      );
-                    },
-                  ),
-                ],
-
-                if (isOwnProfile)
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.logout),
-                      label: const Text("Logout"),
-                      onPressed: () async {
-                        await FirebaseAuth.instance.signOut();
-                        if (context.mounted) {
-                          Navigator.pushReplacementNamed(
-                              context, AppRoutes.login);
-                        }
-                      },
-                    ),
-                  ),
+                ),
               ],
-            ),
+              if (isOwnProfile) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Logout'),
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                    if (!mounted) return;
+                    Navigator.pushReplacementNamed(context, AppRoutes.login);
+                  },
+                ),
+              ],
+            ],
           );
         },
       ),

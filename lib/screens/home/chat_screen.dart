@@ -1,18 +1,19 @@
-import '../../providers/unblock_request_provider.dart';
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'dart:async';
+
 import '../../providers/chat_provider.dart';
 import '../../providers/message_provider.dart';
+import '../../providers/unblock_request_provider.dart';
+import '../../services/relationship_service.dart';
 import '../../widgets/chat_input.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/relationship_tag_dialog.dart';
 import '../../widgets/typing_indicator.dart';
-import '../../services/relationship_service.dart';
 
-// ChatScreen takes chatId, receiverId, and currentUserId
 class ChatScreen extends ConsumerStatefulWidget {
   final String chatId;
   final String receiverId;
@@ -32,37 +33,37 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final RelationshipService _relationshipService = RelationshipService();
+
   bool _showMood = false;
   String _currentMood = '';
   Timer? _moodTimer;
   Timer? _periodicTimer;
 
   static const Map<String, String> moodMessages = {
-    '😊': 'Available',
+    '🙂': 'Available',
     '😔': 'Feeling low',
-    '😴': 'Don’t disturb if not urgent',
-    '😡': 'Irritated',
+    '😴': 'Do not disturb',
+    '😡': 'Busy',
     '🤒': 'Not feeling well',
-    '⚪': 'default',
+    '⚪': 'Status update',
   };
 
   @override
-  void didChangeDependencies() async {
-    super.didChangeDependencies();
-    // Start syncing messages
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeChat();
+    });
+  }
+
+  Future<void> _initializeChat() async {
+    if (widget.chatId.isEmpty || widget.currentUserId.isEmpty) return;
     final chatService = ref.read(chatServiceProvider);
     chatService.syncMessages(widget.chatId, widget.currentUserId);
-    // Mark all messages as read to reset unread badge and update status
-    try {
-      await chatService.markAllMessagesAsRead(
-          widget.chatId, widget.currentUserId);
-      print('ChatScreen: Successfully marked all messages as read.');
-    } catch (e) {
-      print('ChatScreen: Error marking messages as read: $e');
-    }
-    // Debug logs
-    print(
-        'ChatScreen: didChangeDependencies called with chatId=${widget.chatId} and currentUserId=${widget.currentUserId}');
+    await chatService.markAllMessagesAsRead(
+      widget.chatId,
+      widget.currentUserId,
+    );
   }
 
   @override
@@ -73,12 +74,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
+  String _buildStatusText(String status, DateTime? lastSeen, String privacy) {
+    if (_showMood && _currentMood.isNotEmpty) {
+      return '$_currentMood ${moodMessages[_currentMood] ?? ''}'.trim();
+    }
+    if (privacy != 'everyone') return '';
+    if (status == 'online') return 'Online';
+    if (lastSeen == null) return 'Offline';
+    return 'Last seen ${DateFormat('MMM d, h:mm a').format(lastSeen)}';
+  }
+
   void _showTagRelationshipDialog() async {
     final currentTag = await _relationshipService.getRelationshipTag(
       widget.currentUserId,
       widget.receiverId,
     );
-    showDialog(
+    if (!mounted) return;
+
+    showDialog<void>(
       context: context,
       builder: (context) => RelationshipTagDialog(
         initialTag: currentTag,
@@ -88,6 +101,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             widget.receiverId,
             tag,
           );
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Relationship tagged as $tag')),
           );
@@ -98,7 +112,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _showBlockUserDialog() {
     final reasonController = TextEditingController();
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Block User'),
@@ -130,7 +144,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _showUnblockRequestDialog() {
     final messageController = TextEditingController();
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Send Unblock Request'),
@@ -150,10 +164,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   .read(unblockRequestProvider.notifier)
                   .checkUnblockRequestLimit(widget.receiverId);
 
+              if (!mounted) return;
+
               if (canSendRequest) {
                 await ref
                     .read(unblockRequestProvider.notifier)
                     .sendUnblockRequest(widget.receiverId, message: message);
+                if (!mounted) return;
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Unblock request sent.')),
@@ -162,7 +179,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                      content: Text('You have reached your request limit.')),
+                    content: Text('You have reached your request limit.'),
+                  ),
                 );
               }
             },
@@ -175,327 +193,334 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final messagesAsync = ref.watch(messagesProvider(widget.chatId));
-    final isBlockedAsync = ref.watch(isBlockedByProvider(widget.receiverId));
-
-    // Debug log for messagesAsync state
-    print('ChatScreen: messagesProvider watched for chatId=${widget.chatId}');
-
     if (widget.chatId.isEmpty ||
         widget.receiverId.isEmpty ||
         widget.currentUserId.isEmpty) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text("Error"),
-        ),
-        body: const Center(child: Text("Invalid chat parameters")),
+        appBar: AppBar(title: const Text('Error')),
+        body: const Center(child: Text('Invalid chat parameters')),
       );
     }
 
+    final messagesAsync = ref.watch(messagesProvider(widget.chatId));
+    final isBlockedAsync = ref.watch(isBlockedByProvider(widget.receiverId));
+
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: false,
+        titleSpacing: 0,
         title: StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance
               .collection('users')
               .doc(widget.receiverId)
               .snapshots(),
           builder: (context, snapshot) {
-            if (snapshot.hasData && snapshot.data!.exists) {
-              final userData = snapshot.data!.data() as Map<String, dynamic>;
-              final username = userData['username'] ?? 'Unknown User';
-              final fullName = userData['fullName'] ?? '';
-              final profilePhotoUrl = userData['profileImage'] ?? '';
-              final userStatus = userData['status'] ?? 'offline';
-              final lastSeen = (userData['lastSeen'] as Timestamp?)?.toDate();
-              final privacySettings =
-                  Map<String, String>.from(userData['privacySettings'] ?? {});
-              final lastSeenPrivacy = privacySettings['lastSeen'] ?? 'everyone';
+            if (!snapshot.hasData || snapshot.data?.exists != true) {
+              return const Text('Loading...');
+            }
 
-              final mood = userData['mood'] ?? '';
-              if (mood != _currentMood) {
-                _currentMood = mood;
-                _showMood = true;
-                _moodTimer?.cancel();
-                _moodTimer = Timer(const Duration(seconds: 3), () {
-                  if (mounted) {
-                    setState(() {
-                      _showMood = false;
-                    });
-                  }
-                });
-                _periodicTimer?.cancel();
-                if (mood.isNotEmpty) {
-                  _periodicTimer =
-                      Timer.periodic(const Duration(seconds: 15), (timer) {
-                    if (mounted) {
-                      setState(() {
-                        _showMood = true;
-                      });
-                      _moodTimer?.cancel();
-                      _moodTimer = Timer(const Duration(seconds: 3), () {
-                        if (mounted) {
-                          setState(() {
-                            _showMood = false;
-                          });
-                        }
-                      });
-                    }
+            final userData = snapshot.data!.data() as Map<String, dynamic>;
+            final username = userData['username']?.toString() ?? 'Unknown User';
+            final profilePhotoUrl = userData['profileImage']?.toString() ?? '';
+            final userStatus = userData['status']?.toString() ?? 'offline';
+            final mood = userData['mood']?.toString() ?? '';
+            final lastSeen = (userData['lastSeen'] as Timestamp?)?.toDate();
+            final privacySettings = Map<String, String>.from(
+              userData['privacySettings'] ?? {},
+            );
+            final lastSeenPrivacy = privacySettings['lastSeen'] ?? 'everyone';
+
+            if (mood != _currentMood) {
+              _currentMood = mood;
+              _showMood = true;
+              _moodTimer?.cancel();
+              _moodTimer = Timer(const Duration(seconds: 3), () {
+                if (mounted) setState(() => _showMood = false);
+              });
+
+              _periodicTimer?.cancel();
+              if (mood.isNotEmpty) {
+                _periodicTimer = Timer.periodic(const Duration(seconds: 15), (
+                  _,
+                ) {
+                  if (!mounted) return;
+                  setState(() => _showMood = true);
+                  _moodTimer?.cancel();
+                  _moodTimer = Timer(const Duration(seconds: 3), () {
+                    if (mounted) setState(() => _showMood = false);
                   });
-                }
+                });
               }
+            }
 
-              return Row(
+            final statusText = _buildStatusText(
+              userStatus,
+              lastSeen,
+              lastSeenPrivacy,
+            );
+
+            return InkWell(
+              onTap: () {
+                Navigator.pushNamed(
+                  context,
+                  '/profile',
+                  arguments: {'userId': widget.receiverId},
+                );
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: Row(
                 children: [
-                  SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundImage: profilePhotoUrl.isNotEmpty
-                          ? NetworkImage(profilePhotoUrl)
-                          : null,
-                      child: profilePhotoUrl.isEmpty
-                          ? const Icon(Icons.person, size: 16)
-                          : null,
-                    ),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundImage: profilePhotoUrl.isNotEmpty
+                            ? NetworkImage(profilePhotoUrl)
+                            : null,
+                        child: profilePhotoUrl.isEmpty
+                            ? const Icon(Icons.person_rounded)
+                            : null,
+                      ),
+                      Positioned(
+                        right: -1,
+                        bottom: -1,
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: userStatus == 'online'
+                                ? Colors.green.shade500
+                                : Colors.grey.shade400,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () {
-                      // Navigate to user2 profile screen
-                      Navigator.pushNamed(context, '/profile', arguments: {
-                        'userId': widget.receiverId,
-                      });
-                    },
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           username,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
-                        if (_showMood && _currentMood.isNotEmpty)
+                        if (statusText.isNotEmpty)
                           Text(
-                            '$_currentMood "${moodMessages[_currentMood] ?? "default"}"',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.blueAccent,
-                            ),
-                          )
-                        else if (lastSeenPrivacy == 'everyone')
-                          if (userStatus == 'online')
-                            const Text(
-                              'Online',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.green,
-                              ),
-                            )
-                          else if (lastSeen != null)
-                            Text(
-                              'Last seen ${DateFormat.yMd().add_jm().format(lastSeen)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
+                            statusText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: _showMood && _currentMood.isNotEmpty
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
                       ],
                     ),
                   ),
-                  const Spacer(),
-                  PopupMenuButton<String>(
-                    tooltip: 'Menu',
-                    icon: const Icon(Icons.more_vert),
-                    onSelected: (value) {
-                      switch (value) {
-                        case 'profile':
-                          Navigator.pushNamed(
-                            context,
-                            '/profile',
-                            arguments: {'userId': widget.receiverId},
-                          );
-                          break;
-                        case 'tagRelationship':
-                          _showTagRelationshipDialog();
-                          break;
-                        case 'media':
-                          // TODO: Implement media, links, docs
-                          print('Selected: Media, links, docs');
-                          break;
-                        case 'search':
-                          // TODO: Implement search
-                          print('Selected: Search');
-                          break;
-                        case 'mute':
-                          // TODO: Implement mute notifications
-                          print('Selected: Mute notifications');
-                          break;
-                        case 'disappearing':
-                          // TODO: Implement disappearing messages
-                          print('Selected: Disappearing messages');
-                          break;
-                        case 'wallpaper':
-                          // TODO: Implement wallpaper
-                          print('Selected: Wallpaper');
-                          break;
-                        case 'block':
-                          _showBlockUserDialog();
-                          break;
-                        case 'report':
-                          // TODO: Implement report user
-                          print('Selected: Report');
-                          break;
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                          value: 'profile', child: Text("View profile")),
-                      const PopupMenuItem(
-                          value: 'tagRelationship',
-                          child: Text("Tag Relationship")),
-                      const PopupMenuItem(
-                          value: 'media', child: Text("Media, links, docs")),
-                      const PopupMenuItem(
-                          value: 'search', child: Text("Search")),
-                      const PopupMenuItem(
-                          value: 'mute', child: Text("Mute notifications")),
-                      const PopupMenuItem(
-                          value: 'disappearing',
-                          child: Text("Disappearing messages")),
-                      const PopupMenuItem(
-                          value: 'wallpaper', child: Text("Wallpaper")),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem(value: 'block', child: Text("Block")),
-                      const PopupMenuItem(
-                          value: 'report', child: Text("Report")),
-                    ],
-                  ),
                 ],
-              );
-            }
-            return const Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  child: CircularProgressIndicator(),
-                ),
-                SizedBox(width: 8),
-                Text('Loading...'),
-              ],
+              ),
             );
           },
         ),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Menu',
+            onSelected: (value) {
+              switch (value) {
+                case 'profile':
+                  Navigator.pushNamed(
+                    context,
+                    '/profile',
+                    arguments: {'userId': widget.receiverId},
+                  );
+                  break;
+                case 'tagRelationship':
+                  _showTagRelationshipDialog();
+                  break;
+                case 'block':
+                  _showBlockUserDialog();
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'profile', child: Text('View profile')),
+              PopupMenuItem(
+                value: 'tagRelationship',
+                child: Text('Tag Relationship'),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'block', child: Text('Block')),
+            ],
+          ),
+        ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: messagesAsync.when(
-              data: (messages) {
-                if (messages.isEmpty) {
-                  return const Center(child: Text("Say hello 👋"));
-                }
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Theme.of(context).colorScheme.surface,
+              Theme.of(context).scaffoldBackgroundColor,
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: messagesAsync.when(
+                data: (messages) {
+                  if (messages.isEmpty) {
+                    return const _EmptyChatView();
+                  }
 
-                // Scroll to bottom when messages update
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_scrollController.hasClients) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!_scrollController.hasClients) return;
                     _scrollController.animateTo(
                       _scrollController.position.maxScrollExtent,
-                      duration: const Duration(milliseconds: 300),
+                      duration: const Duration(milliseconds: 220),
                       curve: Curves.easeOut,
                     );
-                  }
-                });
+                  });
 
-                print(
-                    'ChatScreen: Building ListView with ${messages.length} messages');
-                return ListView.builder(
-                  controller: _scrollController,
-                  itemCount: messages.length,
-                  itemBuilder: (_, index) {
-                    final msg = messages[index];
-                    print(
-                        'ChatScreen: Building MessageBubble for message ${msg.id}, content: ${msg.content}');
-                    return MessageBubble(
-                      message: msg,
-                      currentUserId: widget.currentUserId,
+                  return ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.only(top: 10, bottom: 12),
+                    itemCount: messages.length,
+                    itemBuilder: (_, index) {
+                      final msg = messages[index];
+                      return MessageBubble(
+                        message: msg,
+                        currentUserId: widget.currentUserId,
+                      );
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stack) => Center(child: Text('Error: $error')),
+              ),
+            ),
+            StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('chats')
+                  .doc(widget.chatId)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasData && snapshot.data?.exists == true) {
+                  final data = snapshot.data!.data() as Map<String, dynamic>;
+                  final typingUsers = List<String>.from(
+                    data['typingUsers'] ?? [],
+                  );
+                  if (typingUsers.contains(widget.receiverId)) {
+                    return const Padding(
+                      padding: EdgeInsets.only(left: 14, right: 14, bottom: 6),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TypingIndicator(),
+                      ),
+                    );
+                  }
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+            isBlockedAsync.when(
+              data: (isBlockedBy) {
+                final blockedUsers = ref.watch(blockedUsersProvider);
+                final isBlocking = blockedUsers.contains(widget.receiverId);
+                final blockReason =
+                    isBlockedBy ? 'You are blocked by this user' : null;
+                final unblockReason =
+                    isBlocking ? 'You have blocked this user' : null;
+
+                return ChatInput(
+                  chatId: widget.chatId,
+                  receiverId: widget.receiverId,
+                  isBlockedBy: isBlockedBy,
+                  isBlocking: isBlocking,
+                  blockReason: blockReason,
+                  unblockReason: unblockReason,
+                  onSendUnblockRequest: _showUnblockRequestDialog,
+                  onUnblock: () async {
+                    await ref
+                        .read(blockedUsersProvider.notifier)
+                        .unblockUser(widget.receiverId);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('User unblocked')),
                     );
                   },
                 );
               },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stack) => Center(child: Text('Error: $error')),
+              loading: () => const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              error: (error, stack) => Text('Error: $error'),
             ),
-          ),
-          // Show total message count at the bottom
-          messagesAsync.when(
-            data: (messages) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Colors.grey[100],
-              child: Text(
-                'Total messages: ${messages.length}',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-                textAlign: TextAlign.center,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyChatView extends StatelessWidget {
+  const _EmptyChatView();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 38,
+                color: theme.colorScheme.onPrimaryContainer,
               ),
             ),
-            loading: () => const SizedBox.shrink(),
-            error: (error, stack) => const SizedBox.shrink(),
-          ),
-          // Typing indicator
-          StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('chats')
-                .doc(widget.chatId)
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.hasData && snapshot.data!.exists) {
-                final data = snapshot.data!.data() as Map<String, dynamic>;
-                final typingUsers =
-                    List<String>.from(data['typingUsers'] ?? []);
-                if (typingUsers.contains(widget.receiverId)) {
-                  return const TypingIndicator();
-                }
-              }
-              return const SizedBox.shrink();
-            },
-          ),
-          isBlockedAsync.when(
-            data: (isBlockedBy) {
-              final blockedUsers = ref.watch(blockedUsersProvider);
-              final isBlocking = blockedUsers.contains(widget.receiverId);
-              String? blockReason;
-              String? unblockReason;
-              if (isBlockedBy) {
-                blockReason = 'You are blocked by this user';
-              }
-              if (isBlocking) {
-                unblockReason = 'You have blocked this user';
-              }
-              return ChatInput(
-                chatId: widget.chatId,
-                receiverId: widget.receiverId,
-                isBlockedBy: isBlockedBy,
-                isBlocking: isBlocking,
-                blockReason: blockReason,
-                unblockReason: unblockReason,
-                onSendUnblockRequest: _showUnblockRequestDialog,
-                onUnblock: () async {
-                  await ref
-                      .read(blockedUsersProvider.notifier)
-                      .unblockUser(widget.receiverId);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('User unblocked')),
-                  );
-                },
-              );
-            },
-            loading: () => const CircularProgressIndicator(),
-            error: (error, stack) => Text('Error: $error'),
-          ),
-        ],
+            const SizedBox(height: 12),
+            Text(
+              'No messages yet',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Start the conversation with a message.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

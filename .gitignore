@@ -65,6 +65,10 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 
+# Sensitive Firebase files
+lib/firebase_options.dart
+web/index.html
+
 # OS files
 Thumbs.db
 Desktop.ini
